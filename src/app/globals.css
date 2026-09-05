@@ -1,0 +1,352 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* ---- Brand / accent (within sky blue) ---- */
+    --blue-600: 211 100% 45%; /* pressed */
+    --blue-500: 211 100% 50%; /* #007AFF primary */
+    --blue-400: 210 100% 64%; /* #4DA6FF calendar / journal tint */
+    --blue-300: 205 100% 76%; /* soft fill */
+
+    /* ---- System tints (journals, tags, map, charts) ---- */
+    --ios-red:    4 90% 58%;   /* #FF3B30 */
+    --ios-orange: 35 100% 50%; /* #FF9500 */
+    --ios-yellow: 48 100% 50%; /* #FFCC00 */
+    --ios-green:  145 63% 49%; /* #34C759 */
+    --ios-teal:   199 89% 64%; /* #5AC8FA */
+    --ios-indigo: 240 60% 60%; /* #5856D6 */
+    --ios-purple: 280 60% 60%; /* #AF52DE */
+    --ios-pink:   343 100% 57%; /* #FF2D55 */
+
+    /* ==========================================================
+       LIGHT THEME (default) — Day One day reading mode
+       #FFFFFF canvas, #007AFF accent
+       ========================================================== */
+    --background: 0 0% 100%;
+    --foreground: 220 9% 12%;           /* #1D1D1F near-black */
+    --card: 0 0% 100%;
+    --card-foreground: 220 9% 12%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 220 9% 12%;
+    --primary: var(--blue-500);
+    --primary-foreground: 0 0% 100%;
+    --secondary: 240 6% 95%;            /* #F1F1F3 fill */
+    --secondary-foreground: 220 9% 12%;
+    --muted: 240 6% 95%;
+    --muted-foreground: 240 3% 49%;     /* #79797F secondary text */
+    --accent: 240 6% 95%;
+    --accent-foreground: 220 9% 12%;
+    --destructive: 4 90% 58%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 240 6% 90%;               /* #E3E3E6 hairline */
+    --input: 240 6% 88%;
+    --ring: var(--blue-500);
+    --radius: 0.5rem;
+
+    /* Sidebar — near-white, faint warm gray */
+    --sidebar-background: 0 0% 100%;
+    --sidebar-foreground: 220 9% 18%;
+    --sidebar-muted: 240 3% 55%;        /* section labels, counts */
+    --sidebar-primary: var(--blue-500);
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 240 5% 93%;       /* selected row #ECECEF */
+    --sidebar-accent-foreground: 220 9% 12%;
+    --sidebar-border: 240 6% 92%;
+    --sidebar-ring: var(--blue-500);
+
+    /* ---- Charts ---- */
+    --chart-1: var(--blue-500);
+    --chart-2: var(--ios-green);
+    --chart-3: var(--ios-orange);
+    --chart-4: var(--ios-purple);
+    --chart-5: var(--ios-red);
+
+    /* ---- Semantic surface / text aliases (consumed by P1–P9 packages) ---- */
+    --surface-canvas:  hsl(var(--background));
+    --surface-card:    hsl(var(--card));
+    --surface-raised:  hsl(var(--popover));
+    --surface-sunken:  hsl(var(--sidebar-background));
+    --text-body:       hsl(var(--foreground));
+    --text-muted:      hsl(var(--muted-foreground));
+    --text-accent:     hsl(var(--primary));
+    --hairline:        hsl(var(--border));
+
+    /* ---- Calendar / journal accent ---- */
+    --cal-fill: var(--blue-400);
+
+    /* ---- Map (atlas look, light) ---- */
+    --map-water: 205 58% 94%;           /* pale sea blue */
+    --map-land: 50 18% 95%;             /* warm paper */
+    --map-land-hover: 50 16% 91%;
+    --map-boundary: 240 6% 74%;
+    --map-city-dot: 240 4% 45%;
+    --map-label: 240 5% 32%;
+    --map-label-halo: 0 0% 100%;
+
+    /* ---- Interactive icons ---- */
+    --star: 48 100% 50%;                /* favorited entries */
+    --heart: 4 90% 58%;                 /* favorite heart in list */
+
+    /* ---- Families ---- */
+    --font-sans:  -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+    --font-serif: "Lora", Georgia, Cambria, "Times New Roman", serif;
+    --font-mono:  ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    --font-ui:    var(--font-sans);
+    --font-reading: var(--font-serif);
+
+    /* ---- Type scale (px) — mirrors iOS sizing ---- */
+    --text-2xs: 10px;
+    --text-xs:  11px;
+    --text-sm:  13px;
+    --text-base: 14px;
+    --text-md:  16px;
+    --text-lg:  19px;
+    --text-xl:  24px;
+    --text-2xl: 30px;
+    --text-3xl: 36px;
+    --text-display: 48px;
+
+    /* ---- Weights ---- */
+    --weight-light:    300;
+    --weight-regular:  400;
+    --weight-medium:   500;
+    --weight-semibold: 600;
+    --weight-bold:     700;
+
+    /* ---- Line heights ---- */
+    --leading-none:    1;
+    --leading-tight:   1.2;
+    --leading-snug:    1.35;
+    --leading-normal:  1.5;
+    --leading-relaxed: 1.7;   /* journal reading column */
+
+    /* ---- Letter spacing ---- */
+    --tracking-tight:   -0.02em;
+    --tracking-normal:  0;
+    --tracking-wide:    0.04em;
+    --tracking-widest:  0.12em;   /* uppercase date eyebrow */
+
+    /* ---- Spacing scale (4px base grid) ---- */
+    --space-0:  0;
+    --space-1:  2px;
+    --space-2:  4px;
+    --space-3:  6px;
+    --space-4:  8px;
+    --space-5:  12px;
+    --space-6:  16px;
+    --space-7:  20px;
+    --space-8:  24px;
+    --space-10: 32px;
+    --space-12: 40px;
+    --space-16: 64px;
+
+    /* ---- Radius ---- */
+    --radius-sm:   calc(var(--radius) - 4px); /* 4px */
+    --radius-md:   calc(var(--radius) - 2px); /* 6px */
+    --radius-lg:   var(--radius);             /* 8px */
+    --radius-xl:   12px;                      /* thumbnails */
+    --radius-2xl:  16px;                      /* app icon / logo tile */
+    --radius-full: 9999px;                    /* pills, avatars, dots */
+
+    /* ---- Elevation — soft, low-contrast iOS shadows ---- */
+    --shadow-xs:      0 1px 2px rgb(0 0 0 / 0.06);
+    --shadow-sm:      0 1px 3px rgb(0 0 0 / 0.10), 0 1px 2px rgb(0 0 0 / 0.06);
+    --shadow-md:      0 4px 12px rgb(0 0 0 / 0.12);
+    --shadow-lg:      0 10px 30px rgb(0 0 0 / 0.18);
+    --shadow-overlay: 0 16px 48px rgb(0 0 0 / 0.30);
+
+    /* ---- Layout ---- */
+    --sidebar-width:      256px;
+    --sidebar-width-icon: 48px;
+    --timeline-width:     440px;   /* fixed entry-list column */
+    --reading-measure:    720px;   /* max-w-3xl reading column */
+    --header-height:      48px;    /* h-12 top bar */
+    --toolbar-height:     40px;
+
+    /* ---- Motion — iOS easing, short & restrained ---- */
+    --ease-standard:  cubic-bezier(0.4, 0, 0.2, 1);
+    --ease-out:       cubic-bezier(0.16, 1, 0.3, 1);
+    --duration-fast:  100ms;
+    --duration-base:  150ms;
+    --duration-slow:  200ms;
+  }
+
+  .dark {
+    /* ==========================================================
+       DARK THEME — Day One night reading mode
+       #1C1C1E canvas, #0A84FF accent
+       ========================================================== */
+    --background: 240 6% 11%;           /* #1C1C1E */
+    --foreground: 240 6% 93%;           /* Apple Label — softer than pure white */
+    --card: 240 6% 11%;
+    --card-foreground: 240 6% 93%;
+    --popover: 240 6% 13%;              /* #2C2C2E */
+    --popover-foreground: 240 6% 93%;
+    --primary: 211 100% 53%;            /* #0A84FF */
+    --primary-foreground: 0 0% 100%;
+    --secondary: 240 5% 17%;
+    --secondary-foreground: 240 6% 93%;
+    --muted: 240 5% 17%;
+    --muted-foreground: 240 4% 56%;
+    --accent: 240 5% 17%;
+    --accent-foreground: 240 6% 93%;
+    --destructive: 4 90% 58%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 240 5% 22%;
+    --input: 240 5% 17%;
+    --ring: 211 100% 53%;
+
+    --sidebar-background: 240 5% 11%;
+    --sidebar-foreground: 0 0% 90%;
+    --sidebar-muted: 240 4% 56%;
+    --sidebar-primary: 211 100% 53%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 240 5% 17%;
+    --sidebar-accent-foreground: 0 0% 90%;
+    --sidebar-border: 240 5% 22%;
+    --sidebar-ring: 211 100% 53%;
+
+    --chart-1: 211 100% 53%;
+    --chart-2: 145 63% 49%;
+    --chart-3: 35 100% 50%;
+    --chart-4: 280 60% 60%;
+    --chart-5: 4 90% 58%;
+
+    /* ---- Map (atlas look, dark) ---- */
+    --map-water: 215 32% 12%;           /* deep night sea */
+    --map-land: 240 4% 19%;
+    --map-land-hover: 240 4% 23%;
+    --map-boundary: 240 5% 32%;
+    --map-city-dot: 240 4% 62%;
+    --map-label: 240 5% 74%;
+    --map-label-halo: 240 6% 10%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+    box-sizing: border-box;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+    font-feature-settings: "liga" 1, "calt" 1;
+  }
+  /* Serif journal content — literary feel for journal text */
+  .font-serif,
+  .reading {
+    font-family: var(--font-serif);
+    font-feature-settings: "liga" 1, "onum" 1, "kern" 1;
+  }
+  /* Safe-area inset variables for installed PWA on notched devices */
+  :root {
+    --safe-top: env(safe-area-inset-top, 0px);
+    --safe-bottom: env(safe-area-inset-bottom, 0px);
+    --safe-left: env(safe-area-inset-left, 0px);
+    --safe-right: env(safe-area-inset-right, 0px);
+  }
+  /* Smoother scrollbars */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: hsl(var(--border));
+    border-radius: 3px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: hsl(var(--muted-foreground) / 0.5);
+  }
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Motion — page transitions + theme-switch crossfade
+   All animations are gated behind prefers-reduced-motion: no-preference
+   so users who need reduced motion see instant changes.
+   ──────────────────────────────────────────────────────────────────────── */
+@media (prefers-reduced-motion: no-preference) {
+  /* Theme crossfade: when next-themes flips the .dark class, smoothly
+     transition background, text, and border colours.
+     Duration matches --duration-slow (200ms) with standard easing. */
+  html {
+    transition:
+      background-color var(--duration-slow) var(--ease-standard),
+      color            var(--duration-slow) var(--ease-standard);
+  }
+
+  /* Page-level fade-in: applied to the top-level <main> / SidebarInset
+     child so each route mount animates in.  Uses the View Transitions API
+     when available; falls back to a CSS @keyframes fade for browsers
+     that don't support it (Raspberry Pi Chromium 108+). */
+  @keyframes within-page-enter {
+    from { opacity: 0; transform: translateY(4px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  .page-enter {
+    animation: within-page-enter var(--duration-slow) var(--ease-out) both;
+  }
+
+  /* View Transitions API (Chromium 111+) — seamless cross-page fades */
+  @supports (view-transition-name: none) {
+    ::view-transition-old(root) {
+      animation: var(--duration-fast) var(--ease-standard) both fade-out;
+    }
+    ::view-transition-new(root) {
+      animation: var(--duration-slow) var(--ease-out)      both fade-in;
+    }
+
+    @keyframes fade-out {
+      from { opacity: 1; }
+      to   { opacity: 0; }
+    }
+    @keyframes fade-in {
+      from { opacity: 0; }
+      to   { opacity: 1; }
+    }
+  }
+}
+
+/* Safe-area inset utilities — always applied (not motion-gated) */
+.pt-safe { padding-top: var(--safe-top); }
+.pb-safe { padding-bottom: var(--safe-bottom); }
+
+/* Journal markers on the MapLibre map (map-view.tsx creates these as DOM elements) */
+.map-marker {
+  width: 11px;
+  height: 11px;
+  border-radius: 9999px;
+  border: 1.5px solid #fff;
+  opacity: 0.85;
+  cursor: pointer;
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.35);
+}
+.map-marker:hover {
+  width: 13px;
+  height: 13px;
+  opacity: 1;
+}
+.map-marker.selected {
+  width: 15px;
+  height: 15px;
+  border-width: 2px;
+  opacity: 1;
+}
+.map-marker.selected::after {
+  content: "";
+  position: absolute;
+  inset: -7px;
+  border-radius: 9999px;
+  border: 1.5px solid currentColor;
+  opacity: 0.35;
+  pointer-events: none;
+}

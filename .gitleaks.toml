@@ -1,0 +1,16 @@
+title = "within"
+
+# Extend with gitleaks' built-in ruleset; only relax specific paths below.
+[extend]
+useDefault = true
+
+[allowlist]
+  description = "Synthetic/example material — no real secrets suppressed here"
+  # .env.example files are illustrative placeholders, never real credentials.
+  # Test fixtures under tests/ or __tests__/ must use invented values only.
+  paths = [
+    # Alle ".env*.example"-Varianten (deckt .env.local.example,
+    # .env.localdev.example und künftige Geschwister konsistent ab).
+    '''(^|/)\.env(\.[\w-]+)?\.example$''',
+    '''(^|/)(tests|__tests__|fixtures)/''',
+  ]

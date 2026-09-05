@@ -1,0 +1,49 @@
+name: Tests
+
+on:
+  pull_request:
+    branches: ["**"]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Lint & unit tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install system dependencies (ffmpeg/ffprobe for the video tests)
+        # apt-get update first: the runner image ships stale package lists.
+        run: sudo apt-get update -qq && sudo apt-get install -y ffmpeg
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck (tsc --noEmit)
+        run: npx tsc --noEmit
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Install gitleaks
+        uses: ./.github/actions/install-gitleaks
+
+      - name: Scan for secrets (gitleaks)
+        run: /tmp/gitleaks detect --source . --config .gitleaks.toml --redact --no-git
+
+      - name: Audit dependencies (npm audit)
+        run: npm audit --audit-level=high --omit=dev

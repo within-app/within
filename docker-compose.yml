@@ -1,0 +1,228 @@
+# ══════════════════════════════════════════════════════════════════════════════
+#  Within — your private, self-hosted journal.
+#
+#  This is the only file you need. Fill in the three settings below, then run
+#      docker compose up -d
+#  and open https://<your server's address> from any device in your home network.
+#  The rest (database, HTTPS certificate, secrets, nightly backup) is automatic.
+#  Setup guide and troubleshooting: README.md in the same repository.
+# ══════════════════════════════════════════════════════════════════════════════
+
+x-settings: &settings
+  # 1) The password you will log in with. Plain text — Within hashes it on the
+  #    first start and stores only the hash. You may blank it out afterwards.
+  #    (If your password contains a "$", write it as "$$".)
+  APP_PASSWORD: "change-me"
+
+  # 2) Your time zone (IANA name, e.g. Europe/Berlin, America/New_York, Asia/Tokyo).
+  #    Determines which day an entry belongs to and which clock time is shown.
+  APP_TIMEZONE: "UTC"
+
+  # 3) The fixed network address of this server in your home network
+  #    (e.g. 192.168.1.50). Give the server a fixed address in your router
+  #    first — the certificate is issued for exactly this address.
+  APP_HOST_IP: "192.168.1.50"
+
+# Optional edits, further down in this file:
+#   - the HTTPS port (443) and the certificate download port (80) if they are
+#     already taken on your server: see "ports:" of the caddy service
+#   - where nightly backups go (default: ./backups next to this file):
+#     see the backup service
+
+services:
+  # Creates the database password and the session-cookie key once, on the
+  # first start, into the "secrets" volume. Later starts find them there.
+  init:
+    image: alpine:3.21
+    restart: "no"
+    volumes:
+      - secrets:/secrets
+    command: >
+      sh -c '
+        gen() { head -c 64 /dev/urandom | base64 | tr -dc "A-Za-z0-9" | head -c 48; }
+        [ -s /secrets/db_password ]    || { gen > /secrets/db_password;    echo "db_password created"; }
+        [ -s /secrets/session_secret ] || { gen > /secrets/session_secret; echo "session_secret created"; }
+        chmod 644 /secrets/db_password /secrets/session_secret
+      '
+
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    # Memory cap so a misbehaving process can never take the database down
+    # with it (small single-board computers have no swap to speak of).
+    mem_limit: 768m
+    logging: &logging
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+    environment:
+      POSTGRES_DB: journal
+      POSTGRES_USER: journal
+      POSTGRES_PASSWORD_FILE: /run/within-secrets/db_password
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - secrets:/run/within-secrets:ro
+    # No "ports:" on purpose — the database is reachable only by the app and
+    # the backup service inside this Compose network.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U journal"]
+      interval: 5s
+      timeout: 5s
+      retries: 15
+      start_period: 60s
+    networks: [within]
+
+  app:
+    image: ghcr.io/within-app/within:latest
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    mem_limit: 1536m
+    logging: *logging
+    environment:
+      <<: *settings
+      NODE_ENV: production
+      # The app is only reachable through the HTTPS proxy (no host port on
+      # this service), so the proxy's forwarded client address is trustworthy.
+      # This makes the login rate limit count per device instead of globally.
+      TRUSTED_PROXY_COUNT: "1"
+    volumes:
+      - media_data:/app/public/media
+      # DATABASE_URL and SESSION_SECRET are built from these files on start.
+      - secrets:/run/within-secrets:ro
+    healthcheck:
+      # 127.0.0.1, not "localhost": inside the container "localhost" may resolve
+      # to ::1 first while the app listens on IPv4 only.
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:4000/api/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks: [within]
+
+  # HTTPS for your home network. Caddy creates its own certificate authority
+  # and a certificate for APP_HOST_IP — nothing to configure, nothing to renew.
+  # Browsers only allow the app's offline encryption on HTTPS, which is why
+  # there is no plain-HTTP way to use Within.
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on: [app]
+    logging: *logging
+    environment:
+      <<: *settings
+    ports:
+      - "443:443"   # the app:  https://APP_HOST_IP
+      - "80:80"     # certificate download only: http://APP_HOST_IP/within-root-ca.crt
+    configs:
+      - source: caddyfile
+        target: /etc/caddy/Caddyfile
+    volumes:
+      # Certificate authority and certificates — must persist, or every
+      # restart would mint a new certificate your devices don't trust.
+      - caddy_data:/data
+      - caddy_config:/config
+    networks: [within]
+
+  # Copies the certificate authority's root certificate next to this file
+  # (./certificate/within-root-ca.crt) so you can install it on your laptop
+  # and phone. Runs on every start; harmless when the file already exists.
+  certificate:
+    image: alpine:3.21
+    restart: "no"
+    depends_on: [caddy]
+    volumes:
+      - caddy_data:/data:ro
+      - ./certificate:/certificate
+    command: >
+      sh -c '
+        i=0
+        while [ ! -f /data/caddy/pki/authorities/local/root.crt ]; do
+          i=$$((i+1)); [ $$i -ge 60 ] && { echo "root certificate not found after 120s"; exit 1; }; sleep 2
+        done
+        cp /data/caddy/pki/authorities/local/root.crt /certificate/within-root-ca.crt
+        chmod 644 /certificate/within-root-ca.crt
+        echo "certificate/within-root-ca.crt is ready - install it on your devices"
+      '
+
+  # Nightly backup: a DB dump + a copy of your media, every night at 02:00 in
+  # your time zone (see scripts/backup/loop.sh). Result shows up under
+  # Settings → Backup in the app.
+  #
+  # The ./backups folder below is on the SAME disk as everything else — fine
+  # against a "whoops, deleted the wrong entry" moment, useless if that disk
+  # fails. Point this at a folder on a different physical drive (an external
+  # USB disk, a NAS share mounted on the host, a second internal disk) for
+  # actual disaster protection. See docs/backup-restore.md.
+  #
+  # Runs as root: this is the only service that writes to ./backups, and an
+  # external drive is often exFAT/NTFS, which has no real concept of the
+  # app's uid/gid — root sidesteps that instead of chasing permissions across
+  # filesystems. The service itself sets tight permissions (700/600) on what
+  # it writes.
+  backup:
+    image: ghcr.io/within-app/within:latest
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    user: root
+    mem_limit: 512m
+    logging: *logging
+    environment:
+      <<: *settings
+      WITHIN_DB_HOST: db
+    command: ["bash", "scripts/backup/loop.sh"]
+    volumes:
+      - media_data:/app/public/media:ro
+      - secrets:/run/within-secrets:ro
+      - ./backups:/backup
+    networks: [within]
+
+configs:
+  caddyfile:
+    content: |
+      {
+        # A bare IP address sends no server name - tell Caddy which certificate to use.
+        default_sni {$$APP_HOST_IP}
+      }
+
+      {$$APP_HOST_IP} {
+        tls internal
+        # The root certificate is also served here, so a phone that insists on
+        # https reaches it after accepting the one-time warning.
+        handle /within-root-ca.crt {
+          root * /data/caddy/pki/authorities/local
+          rewrite * /root.crt
+          header Content-Type application/x-x509-ca-cert
+          file_server
+        }
+        reverse_proxy app:4000
+      }
+
+      # Plain HTTP serves only the root certificate for download; everything
+      # else is sent to HTTPS.
+      http://{$$APP_HOST_IP} {
+        handle /within-root-ca.crt {
+          root * /data/caddy/pki/authorities/local
+          rewrite * /root.crt
+          header Content-Type application/x-x509-ca-cert
+          file_server
+        }
+        handle {
+          redir https://{host}{uri} permanent
+        }
+      }
+
+volumes:
+  postgres_data:
+  media_data:
+  secrets:
+  caddy_data:
+  caddy_config:
+
+networks:
+  within:

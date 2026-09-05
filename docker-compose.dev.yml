@@ -1,0 +1,146 @@
+# Local development stack — builds from source, seeds synthetic data automatically.
+# NOT for production use. Credentials come from .env.localdev (see .env.localdev.example).
+#
+# Quick start:
+#   cp .env.localdev.example .env.localdev
+#   docker compose -f docker-compose.dev.yml --env-file .env.localdev up --build
+#
+# App:  http://localhost:${WITHIN_DEV_PORT:-4000}  (password: localtest)
+# DB:   localhost:${WITHIN_DEV_DB_PORT:-5432} (user: journal, password from .env.localdev)
+#
+# Override ports if defaults conflict with another running service:
+#   WITHIN_DEV_PORT=4001 WITHIN_DEV_DB_PORT=5433 docker compose -f docker-compose.dev.yml …
+
+services:
+  db:
+    # json-file ohne Limit schreibt unbegrenzt — eine Crash-Loop
+    # füllt die SD-Karte (ENOSPC → Postgres tot). 10m×3 pro Service.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    image: postgres:16-alpine
+    restart: unless-stopped
+    env_file:
+      - .env.localdev
+    environment:
+      POSTGRES_DB: journal
+      POSTGRES_USER: journal
+    volumes:
+      - dev_postgres_data:/var/lib/postgresql/data
+      - ./src/lib/db/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql
+      - ./scripts/seed-dev.sql:/docker-entrypoint-initdb.d/02-seed.sql
+    ports:
+      - "127.0.0.1:${WITHIN_DEV_DB_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U journal"]
+      interval: 5s
+      timeout: 5s
+      retries: 15
+      start_period: 30s
+    networks:
+      - journal-dev-net
+
+  app:
+    # json-file ohne Limit schreibt unbegrenzt — eine Crash-Loop
+    # füllt die SD-Karte (ENOSPC → Postgres tot). 10m×3 pro Service.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    build:
+      context: .
+      dockerfile: Dockerfile
+      # host network during build: lets apk/npm reach external repos on VPS
+      # where Docker's isolated DNS (1.1.1.1/8.8.8.8) is not reachable.
+      network: host
+    restart: unless-stopped
+    env_file:
+      - .env.localdev
+    environment:
+      # E2E-Suite: Ohne TRUSTED_PROXY_COUNT teilen sich
+      # alle Playwright-Tests EINEN Rate-Limit-Bucket (60/min, Matcher deckt
+      # auch HTML-Navigationen) — im Suite-Verbund 429t dann mitten im Test
+      # eine Navigation (Chrome-Fehlerseite) oder der Sync-Flush. Nur dev.
+      RATE_LIMIT_API_MAX: "1000"
+      # Das Standalone-Build erzwingt NODE_ENV=production
+      # (server.js), damit 403te /api/test/seed und die seed-abhängigen
+      # E2E-Specs (dom-node-count, timeline-infinite-scroll, visual-regression,
+      # pwa-offline-sync u. a.) fielen im Verbund aus. Endpoint bleibt
+      # session-auth-gated. Nur dev.
+      ENABLE_SEED_ENDPOINT: "true"
+      # Zeitzone für Kalendertage/Uhrzeiten; UTC wenn nicht gesetzt (siehe .env.localdev).
+      APP_TIMEZONE: ${APP_TIMEZONE:-UTC}
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:${WITHIN_DEV_PORT:-4000}:4000"
+    volumes:
+      - dev_media_data:/app/public/media
+    networks:
+      - journal-dev-net
+
+  # Optional Caddy profile for LAN HTTPS (PWA install from a phone, vault/PIN
+  # testing). Same mechanism as the production compose file: Caddy issues its
+  # own certificate for WITHIN_DEV_HOST_IP (tls internal); the root certificate
+  # is served at http://<ip>/within-root-ca.crt for installing on devices.
+  # Start with: WITHIN_DEV_HOST_IP=192.168.x.x docker compose -f docker-compose.dev.yml --env-file .env.localdev --profile https up --build
+  caddy:
+    # json-file ohne Limit schreibt unbegrenzt — eine Crash-Loop
+    # füllt die SD-Karte (ENOSPC → Postgres tot). 10m×3 pro Service.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    image: caddy:2-alpine
+    profiles: ["https"]
+    restart: unless-stopped
+    environment:
+      APP_HOST_IP: ${WITHIN_DEV_HOST_IP:-127.0.0.1}
+    ports:
+      - "0.0.0.0:443:443"
+      - "0.0.0.0:80:80"
+    configs:
+      - source: caddyfile
+        target: /etc/caddy/Caddyfile
+    volumes:
+      - caddy_data:/data
+    depends_on:
+      - app
+    networks:
+      - journal-dev-net
+
+configs:
+  caddyfile:
+    content: |
+      {
+        default_sni {$$APP_HOST_IP}
+      }
+      {$$APP_HOST_IP} {
+        tls internal
+        reverse_proxy app:4000
+      }
+      http://{$$APP_HOST_IP} {
+        handle /within-root-ca.crt {
+          root * /data/caddy/pki/authorities/local
+          rewrite * /root.crt
+          header Content-Type application/x-x509-ca-cert
+          file_server
+        }
+        handle {
+          redir https://{host}{uri} permanent
+        }
+      }
+
+volumes:
+  dev_postgres_data:
+  dev_media_data:
+  caddy_data:
+
+networks:
+  journal-dev-net:
+    driver: bridge
