@@ -21,6 +21,7 @@ export const CreateEntrySchema = z.object({
   photos:    z.array(z.object({
     filePath:      z.string().max(500),
     thumbnailPath: z.string().max(500).optional(),
+    type:          z.enum(["photo", "video", "audio"]).optional(),
   })).max(50).default([]),
 }).merge(LocationSchema).merge(WeatherSchema)
 

@@ -14,11 +14,15 @@
  * Harness-Muster wie tests/sw-media-encryption.test.ts: public/sw.js läuft
  * wirklich in einer Node-Sandbox. Nur synthetische Daten.
  */
-import { describe, it, expect } from "vitest"
+import { describe, it, expect, vi, afterEach } from "vitest"
 import { readFileSync } from "fs"
 import { join } from "path"
 
 const ORIGIN = "https://within.test"
+const SW_SRC = readFileSync(join(__dirname, "../public/sw.js"), "utf8")
+const SHELL_VER = SW_SRC.match(/const SHELL_VER = '(\w+)'/)![1]
+const SHELL_CACHE = `within-shell-${SHELL_VER}`
+const STATIC_CACHE = `within-static-${SHELL_VER}`
 
 class MemCache {
   store = new Map<string, Response>()
@@ -85,8 +89,7 @@ function makeSwEnv() {
     const req = input instanceof Request ? input : new Request(new URL(String(input), ORIGIN), init)
     return fetchImpl(req)
   }
-  const src = readFileSync(join(__dirname, "../public/sw.js"), "utf8")
-  new Function("self", "caches", "clients", "fetch", src)(self, cacheStorage, swClients, fetchFn)
+  new Function("self", "caches", "clients", "fetch", SW_SRC)(self, cacheStorage, swClients, fetchFn)
 
   const dispatchFetch = async (request: Request): Promise<Response> => {
     let responsePromise: Promise<Response> | undefined
@@ -116,15 +119,15 @@ function makeSwEnv() {
   }
 }
 
-function htmlResponse(): Response {
-  return new Response("<!doctype html><title>within</title>", {
+function htmlResponse(title = "within"): Response {
+  return new Response(`<!doctype html><title>${title}</title>`, {
     status: 200,
     headers: { "Content-Type": "text/html; charset=utf-8" },
   })
 }
 
-function chunkResponse(): Response {
-  return new Response("console.log('synthetic-chunk')", {
+function chunkResponse(body = "console.log('synthetic-chunk')"): Response {
+  return new Response(body, {
     status: 200,
     headers: { "Content-Type": "application/javascript" },
   })
@@ -137,7 +140,7 @@ describe("SW Static-Cache-Persistenz (B15)", () => {
     // Verzögerter Put simuliert den Moment, in dem der Browser den SW direkt
     // nach respondWith beendet: nur ein waitUntil-registrierter Put ist dann
     // noch garantiert.
-    const staticCache = await env.cacheStorage.open("within-static-v9")
+    const staticCache = await env.cacheStorage.open(STATIC_CACHE)
     staticCache.putDelayMs = 20
 
     const url = `${ORIGIN}/_next/static/chunks/synthetic-abc123.js`
@@ -158,7 +161,7 @@ describe("SW Shell-Cache-Deckel (B16)", () => {
       )
     }
 
-    const shell = await env.cacheStorage.open("within-shell-v9")
+    const shell = await env.cacheStorage.open(SHELL_CACHE)
     const extraEntries = [...shell.store.keys()].filter(
       (url) => !url.endsWith("/") && !url.endsWith("/login")
     )
@@ -166,5 +169,68 @@ describe("SW Shell-Cache-Deckel (B16)", () => {
     // Die zuletzt besuchten URLs überleben, die ältesten wurden verdrängt.
     expect(shell.store.has(`${ORIGIN}/entry/synthetic-44`)).toBe(true)
     expect(shell.store.has(`${ORIGIN}/entry/synthetic-0`)).toBe(false)
+  })
+})
+
+describe("SW Navigation: Timeout vor dem Cache-Fallback", () => {
+  afterEach(() => vi.useRealTimers())
+
+  it("hängendes Netz (WLAN da, Pi weg): nach 4 s kommt die gecachte Shell — die späte Antwort landet trotzdem im Cache und füllt das Precache nach", async () => {
+    vi.useFakeTimers()
+    const env = makeSwEnv()
+    const shell = await env.cacheStorage.open(SHELL_CACHE)
+    await shell.put(`${ORIGIN}/`, htmlResponse())
+    const url = `${ORIGIN}/entry/synthetic-1`
+    // Nur die Navigation hängt (9 s, jenseits der 4 s); das Precache-Nachfüllen
+    // ('/login' fehlt) antwortet sofort.
+    env.setFetch((req) =>
+      req.url === url
+        ? new Promise((resolve) => setTimeout(() => resolve(htmlResponse("late")), 9_000))
+        : Promise.resolve(htmlResponse())
+    )
+
+    const pending = env.dispatchFetch(new Request(url, { headers: { accept: "text/html" } }))
+    await vi.advanceTimersByTimeAsync(9_000)
+    const res = await pending
+
+    expect(await res.text()).toContain("<title>within</title>")
+    expect(await (await shell.match(url))?.text()).toContain("<title>late</title>")
+    expect(shell.store.has(`${ORIGIN}/login`)).toBe(true)
+  })
+
+  it("hängendes Netz ohne Cache: die Netzantwort wird abgewartet (kein Offline-Hinweis)", async () => {
+    vi.useFakeTimers()
+    const env = makeSwEnv()
+    const url = `${ORIGIN}/entry/synthetic-2`
+    env.setFetch((req) =>
+      req.url === url
+        ? new Promise((resolve) => setTimeout(() => resolve(htmlResponse("late")), 9_000))
+        : Promise.resolve(htmlResponse())
+    )
+
+    const pending = env.dispatchFetch(new Request(url, { headers: { accept: "text/html" } }))
+    await vi.advanceTimersByTimeAsync(9_000)
+    const res = await pending
+
+    expect(await res.text()).toContain("<title>late</title>")
+  })
+})
+
+describe("SW /map/: cache-first bleibt — der Worker-Pfad ist versioniert", () => {
+  it("ein versionierter Worker-Request kommt aus dem Cache, ohne das Netz zu fragen", async () => {
+    const env = makeSwEnv()
+    const url = `${ORIGIN}/map/6.9.0/maplibre-gl-worker.mjs`
+    const staticCache = await env.cacheStorage.open(STATIC_CACHE)
+    await staticCache.put(url, chunkResponse("cached-worker"))
+    let networkCalls = 0
+    env.setFetch(async () => {
+      networkCalls++
+      return chunkResponse("network-worker")
+    })
+
+    const res = await env.dispatchFetch(new Request(url))
+
+    expect(await res.text()).toBe("cached-worker")
+    expect(networkCalls).toBe(0)
   })
 })

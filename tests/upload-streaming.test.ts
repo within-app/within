@@ -1,11 +1,9 @@
 /**
- * Video & Audio upload must stream to disk without buffering into heap.
+ * Upload bodies must stream to disk without buffering into heap.
  *
- * Red assertions (fail before the fix):
- *   1. saveFileToDisk exports from @/lib/upload-stream (module not found before fix)
- *   2. Data lands on disk at the expected path with correct size
- *   3. arrayBuffer() is NEVER called on the file-like object (streaming invariant)
- *   4. Heap growth during a 10 MB write stays below the file size
+ * saveBodyToDisk takes the raw request body (Web ReadableStream), pipes it
+ * to disk and counts bytes: exceeding maxBytes aborts with UploadTooLargeError
+ * (fail-safe behind the content-length pre-check).
  *
  * Synthetic data only — no real journal content.
  */
@@ -14,39 +12,23 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest"
 import { mkdtempSync, rmSync, statSync, existsSync } from "fs"
 import { join } from "path"
 import { tmpdir } from "os"
-import { saveFileToDisk } from "../src/lib/upload-stream"
+import { saveBodyToDisk, UploadTooLargeError } from "../src/lib/upload-stream"
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
-/**
- * Creates a File-like object that streams data without offering arrayBuffer().
- * If saveFileToDisk calls arrayBuffer() it throws — proving buffering happened.
- */
-function makeStreamOnlyFile(data: Uint8Array): {
-  stream: () => ReadableStream<Uint8Array>
-  arrayBuffer: () => Promise<ArrayBuffer>
-} {
-  return {
-    stream() {
-      return new ReadableStream<Uint8Array>({
-        start(controller) {
-          // Emit in 64 KB chunks to simulate real streaming
-          const CHUNK = 64 * 1024
-          let offset = 0
-          while (offset < data.length) {
-            controller.enqueue(data.subarray(offset, offset + CHUNK))
-            offset += CHUNK
-          }
-          controller.close()
-        },
-      })
+/** Streams data in 64 KB chunks like a real request body. */
+function makeBody(data: Uint8Array): ReadableStream<Uint8Array> {
+  return new ReadableStream<Uint8Array>({
+    start(controller) {
+      const CHUNK = 64 * 1024
+      let offset = 0
+      while (offset < data.length) {
+        controller.enqueue(data.subarray(offset, offset + CHUNK))
+        offset += CHUNK
+      }
+      controller.close()
     },
-    arrayBuffer(): Promise<ArrayBuffer> {
-      throw new Error(
-        "arrayBuffer() must NOT be called on video/audio files — use stream() instead"
-      )
-    },
-  }
+  })
 }
 
 // ── Fixtures ───────────────────────────────────────────────────────────────
@@ -63,26 +45,24 @@ afterAll(() => {
 
 // ── Tests ──────────────────────────────────────────────────────────────────
 
-describe("saveFileToDisk", () => {
-  it("writes file data to disk at the expected path", async () => {
+describe("saveBodyToDisk", () => {
+  it("writes the body to disk at the expected path and returns the byte count", async () => {
     const data = new Uint8Array(256 * 1024).fill(0xab) // 256 KB synthetic
     const destPath = join(tmpRoot, "synth-video.mp4")
-    const file = makeStreamOnlyFile(data)
 
-    await saveFileToDisk(file, destPath)
+    await expect(saveBodyToDisk(makeBody(data), destPath, data.byteLength)).resolves.toBe(data.byteLength)
 
     expect(existsSync(destPath)).toBe(true)
     expect(statSync(destPath).size).toBe(data.byteLength)
   })
 
-  it("does not call arrayBuffer() — streams directly to disk", async () => {
-    // makeStreamOnlyFile.arrayBuffer() throws if called — test passes only if streaming is used
-    const data = new Uint8Array(1024).fill(0xcd)
-    const destPath = join(tmpRoot, "no-buffer.mp3")
-    const file = makeStreamOnlyFile(data)
+  it("aborts with UploadTooLargeError once the body exceeds maxBytes", async () => {
+    const data = new Uint8Array(200 * 1024).fill(0xcd)
+    const destPath = join(tmpRoot, "too-large.mp3")
 
-    // Must not throw (arrayBuffer not called)
-    await expect(saveFileToDisk(file, destPath)).resolves.toBeUndefined()
+    await expect(saveBodyToDisk(makeBody(data), destPath, 100 * 1024)).rejects.toBeInstanceOf(UploadTooLargeError)
+    // Fail-safe stops early — never the full body on disk.
+    expect(statSync(destPath).size).toBeLessThan(data.byteLength)
   })
 
   it("heap growth during a 10 MB write stays below the file size", async () => {
@@ -96,12 +76,11 @@ describe("saveFileToDisk", () => {
     }
 
     const destPath = join(tmpRoot, "heap-check.mp4")
-    const file = makeStreamOnlyFile(data)
 
     if (typeof global.gc === "function") global.gc()
     const memBefore = process.memoryUsage().heapUsed
 
-    await saveFileToDisk(file, destPath)
+    await saveBodyToDisk(makeBody(data), destPath, FILE_BYTES)
 
     if (typeof global.gc === "function") global.gc()
     const memAfter = process.memoryUsage().heapUsed

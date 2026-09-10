@@ -103,4 +103,17 @@ describe("replaceEntryTags via upsertEntries — FIND F1 delete-before-insert", 
       expect(params).toContain(ENTRY_ID)
     }
   })
+
+  it("Tag-Upsert sperrt bestehende Tags in Namensreihenfolge (ORDER BY 1) — sonst Deadlock zweier Geräte", async () => {
+    const sqls: string[] = []
+    mockClient.query.mockImplementation(async (sql: string) => {
+      sqls.push(sql)
+      if (sql.includes("SELECT NOW()")) return { rows: [{ server_now: new Date() }] }
+      if (sql.includes("INSERT INTO tags")) return { rows: [{ id: "tag-id-1" }] }
+      return { rows: [] }
+    })
+    await upsertEntries([makeSyncEntry(["zeta", "alpha"])])
+    const upsert = sqls.find((s) => s.includes("INSERT INTO tags"))!
+    expect(upsert).toMatch(/SELECT DISTINCT UNNEST\(\$1::text\[\]\) ORDER BY 1/)
+  })
 })

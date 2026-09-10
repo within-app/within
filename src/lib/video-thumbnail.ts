@@ -152,71 +152,86 @@ export async function extractPoster(
 
 /**
  * Best-effort background loop-clip generator.
- * Spawns ffmpeg detached; returns immediately (fire-and-forget).
- * A hard kill timer (LOOP_TIMEOUT_MS) ensures a broken video cannot leave an
- * unkillable ffmpeg process consuming CPU/RAM on the Pi 4.
+ * Returns immediately (fire-and-forget); the ffmpeg runs are serialised on a
+ * module-wide chain so five uploads never mean five parallel decoders on the
+ * Pi 4. A hard kill timer (LOOP_TIMEOUT_MS) ensures a broken video cannot
+ * leave an unkillable ffmpeg process consuming CPU/RAM — and does not block
+ * the chain (settles on kill, close or spawn error, whichever comes first).
  * On ffmpeg success writes preview_path on the media row.
  * Logs loudly on any failure — never throws, never silently drops.
  *
  * @param outputPath  Filesystem path for ffmpeg to write the animated WebP.
  * @param dbPath      Web-accessible path stored in preview_path (defaults to outputPath).
  */
+let clipChain: Promise<void> = Promise.resolve()
+
 export function generateLoopClip(
   videoPath: string,
   outputPath: string,
   mediaId: string,
   dbPath?: string
 ): void {
-  const proc = spawn(
-    ffmpegBin(),
-    [
-      "-i", videoPath,
-      "-t", String(LOOP_CLIP_SECS),
-      "-vf", `scale=${MAX_POSTER_DIM}:-1`,
-      "-loop", "0",  // animated WebP: loop forever
-      "-an",         // mute
-      "-y",
-      outputPath,
-    ],
-    { stdio: "ignore" }
-  )
+  clipChain = clipChain
+    .then(() => runClip(videoPath, outputPath, mediaId, dbPath))
+    .catch(() => {})
+}
 
-  // Hard kill: if ffmpeg hangs on a broken/truncated file, clean it up
-  const killTimer = setTimeout(() => {
-    proc.kill("SIGKILL")
-    logError(
-      "[video-thumbnail] generateLoopClip timed out",
-      new Error(`ffmpeg exceeded ${LOOP_TIMEOUT_MS}ms on ${videoPath}`)
+function runClip(videoPath: string, outputPath: string, mediaId: string, dbPath?: string): Promise<void> {
+  return new Promise((done) => {
+    const proc = spawn(
+      ffmpegBin(),
+      [
+        "-i", videoPath,
+        "-t", String(LOOP_CLIP_SECS),
+        "-vf", `scale=${MAX_POSTER_DIM}:-1`,
+        "-loop", "0",  // animated WebP: loop forever
+        "-an",         // mute
+        "-y",
+        outputPath,
+      ],
+      { stdio: "ignore" }
     )
-  }, LOOP_TIMEOUT_MS)
 
-  proc.on("error", (err) => {
-    clearTimeout(killTimer)
-    logError("[video-thumbnail] generateLoopClip spawn error", err)
-  })
-
-  proc.on("close", (code) => {
-    clearTimeout(killTimer)
-    if (code !== 0) {
+    // Hard kill: if ffmpeg hangs on a broken/truncated file, clean it up
+    const killTimer = setTimeout(() => {
+      proc.kill("SIGKILL")
       logError(
-        "[video-thumbnail] generateLoopClip failed",
-        new Error(`ffmpeg exited ${code}`)
+        "[video-thumbnail] generateLoopClip timed out",
+        new Error(`ffmpeg exceeded ${LOOP_TIMEOUT_MS}ms on ${videoPath}`)
       )
-      return
-    }
-    db.query("UPDATE media SET preview_path = $1 WHERE id = $2", [
-      dbPath ?? outputPath,
-      mediaId,
-    ]).then((result) => {
-      if ((result.rowCount ?? 0) === 0) {
-        // Media row deleted while ffmpeg was running (fire-and-forget path) —
-        // without this the finished loop clip stays on disk forever, referenced
-        // by nothing and invisible to the DELETE route.
-        logWarn("[video-thumbnail] media row gone — removing orphaned loop clip:", mediaId)
-        return unlink(outputPath).catch(() => {})
+      done()
+    }, LOOP_TIMEOUT_MS)
+
+    proc.on("error", (err) => {
+      clearTimeout(killTimer)
+      logError("[video-thumbnail] generateLoopClip spawn error", err)
+      done()
+    })
+
+    proc.on("close", (code) => {
+      clearTimeout(killTimer)
+      done()
+      if (code !== 0) {
+        logError(
+          "[video-thumbnail] generateLoopClip failed",
+          new Error(`ffmpeg exited ${code}`)
+        )
+        return
       }
-    }).catch((err) =>
-      logError("[video-thumbnail] generateLoopClip: DB write failed", err)
-    )
+      db.query("UPDATE media SET preview_path = $1 WHERE id = $2", [
+        dbPath ?? outputPath,
+        mediaId,
+      ]).then((result) => {
+        if ((result.rowCount ?? 0) === 0) {
+          // Media row deleted while ffmpeg was running (fire-and-forget path) —
+          // without this the finished loop clip stays on disk forever, referenced
+          // by nothing and invisible to the DELETE route.
+          logWarn("[video-thumbnail] media row gone — removing orphaned loop clip:", mediaId)
+          return unlink(outputPath).catch(() => {})
+        }
+      }).catch((err) =>
+        logError("[video-thumbnail] generateLoopClip: DB write failed", err)
+      )
+    })
   })
 }

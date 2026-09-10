@@ -1,5 +1,5 @@
 import { PassThrough } from "stream"
-import { Readable } from "stream"
+import { ReadableStream as NodeReadableStream } from "stream/web"
 import { ZipArchive } from "archiver"
 
 interface ExportMediaFile {
@@ -54,5 +54,7 @@ export function createExportArchiveStream(
   // pipe and closes the PassThrough naturally.
   archive.finalize()
 
-  return Readable.toWeb(passThrough) as ReadableStream
+  // ReadableStream.from, not Readable.toWeb — same cancel race as in
+  // media-stream.ts (client aborts the download → enqueue on a closed controller).
+  return NodeReadableStream.from(passThrough) as ReadableStream
 }

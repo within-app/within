@@ -14,6 +14,17 @@ function createPool(): Pool {
     max: 10,
     idleTimeoutMillis: 30000,
     connectionTimeoutMillis: 5000,
+    // Server-side guards: a runaway statement or a stuck transaction must not
+    // hold one of the 10 slots forever. Longest legitimate single statement in
+    // request handling is the export's full-entries SELECT — seconds on the
+    // Pi, so 120 s is generous (the migration opts out, see migrate.ts).
+    // Between BEGIN and COMMIT the app only awaits DB calls (no file I/O
+    // inside transactions), so 60 s idle-in-transaction is safe.
+    // No client-side query_timeout on purpose: pg only drops the query and
+    // leaves a socket that is no longer readyForQuery in the pool — the next
+    // borrower would inherit that zombie client.
+    statement_timeout: 120_000,
+    idle_in_transaction_session_timeout: 60_000,
   })
 }
 

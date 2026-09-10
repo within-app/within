@@ -27,7 +27,23 @@ x-settings: &settings
 #   - the HTTPS port (443) and the certificate download port (80) if they are
 #     already taken on your server: see "ports:" of the caddy service
 #   - where nightly backups go (default: ./backups next to this file):
-#     see the backup service
+#     see "x-backup-dir" right below
+
+# Where nightly backups go — and where the restore picker under Settings →
+# Backup reads them from. The ./backups folder is on the SAME disk as
+# everything else: fine against a "whoops, deleted the wrong entry" moment,
+# useless if that disk fails. Point "source" at a folder on a different
+# physical drive (an external USB disk, a NAS share mounted on the host, a
+# second internal disk) for actual disaster protection. See
+# docs/backup-restore.md. Used by two services below: backup writes here,
+# app only reads.
+x-backup-dir: &backup_dir
+  type: bind
+  source: ./backups
+  target: /backup
+  # Long syntax does not create a missing source folder by itself (short
+  # syntax did) — without this, a first start on a fresh checkout fails.
+  bind: { create_host_path: true }
 
 services:
   # Creates the database password and the session-cookie key once, on the
@@ -89,18 +105,32 @@ services:
       # this service), so the proxy's forwarded client address is trustworthy.
       # This makes the login rate limit count per device instead of globally.
       TRUSTED_PROXY_COUNT: "1"
+      # Without this Node sizes its heap by the Pi's physical RAM, not by
+      # mem_limit — and the OOM killer takes the whole process down.
+      NODE_OPTIONS: "--max-old-space-size=768"
     volumes:
       - media_data:/app/public/media
       # DATABASE_URL and SESSION_SECRET are built from these files on start.
       - secrets:/run/within-secrets:ro
+      # Read-only: the app lists the backups for the restore picker and asks
+      # the backup service (via the database) to restore one — it never
+      # writes here itself.
+      - <<: *backup_dir
+        read_only: true
     healthcheck:
       # 127.0.0.1, not "localhost": inside the container "localhost" may resolve
       # to ::1 first while the app listens on IPv4 only.
       test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:4000/api/health || exit 1"]
       interval: 10s
-      timeout: 5s
+      # Above the app's 5s connect timeout, so a 503 "db_down" reaches wget
+      # instead of the check timing out first.
+      timeout: 8s
       retries: 5
-      start_period: 30s
+      # /api/health answers 503 until the DB is reachable. Migration retry
+      # budget: 30 × (2s wait + 5s connect timeout) ≈ 210s, plus Next boot.
+      # "unhealthy" is a status badge and start-order signal only — Compose
+      # restarts nothing on it.
+      start_period: 240s
     networks: [within]
 
   # HTTPS for your home network. Caddy creates its own certificate authority
@@ -150,19 +180,16 @@ services:
 
   # Nightly backup: a DB dump + a copy of your media, every night at 02:00 in
   # your time zone (see scripts/backup/loop.sh). Result shows up under
-  # Settings → Backup in the app.
+  # Settings → Backup in the app. The same service also performs a restore
+  # when you pick a backup there (scripts/backup/restore.sh) — it is the only
+  # process that can drop and refill the database without cutting off its
+  # own connection. Where the backups go: "x-backup-dir" at the top.
   #
-  # The ./backups folder below is on the SAME disk as everything else — fine
-  # against a "whoops, deleted the wrong entry" moment, useless if that disk
-  # fails. Point this at a folder on a different physical drive (an external
-  # USB disk, a NAS share mounted on the host, a second internal disk) for
-  # actual disaster protection. See docs/backup-restore.md.
-  #
-  # Runs as root: this is the only service that writes to ./backups, and an
-  # external drive is often exFAT/NTFS, which has no real concept of the
-  # app's uid/gid — root sidesteps that instead of chasing permissions across
-  # filesystems. The service itself sets tight permissions (700/600) on what
-  # it writes.
+  # Runs as root: this is the only service that writes to the backup folder,
+  # and an external drive is often exFAT/NTFS, which has no real concept of
+  # the app's uid/gid — root sidesteps that instead of chasing permissions
+  # across filesystems. The service itself sets tight permissions (711/600)
+  # on what it writes.
   backup:
     image: ghcr.io/within-app/within:latest
     restart: unless-stopped
@@ -175,11 +202,19 @@ services:
     environment:
       <<: *settings
       WITHIN_DB_HOST: db
+      # Optional, for a removable backup drive (USB stick): refuse to back up
+      # or restore unless the marker file .within-backup-stick exists in the
+      # backup folder — an empty mount folder after a reboot looks like a
+      # mounted drive from inside the container. Create the marker once with
+      #   touch <backup folder>/.within-backup-stick
+      # and then enable (default: off). See docs/backup-restore.md.
+      # BACKUP_REQUIRE_MARKER: "true"
     command: ["bash", "scripts/backup/loop.sh"]
     volumes:
-      - media_data:/app/public/media:ro
+      # Writable: a restore copies the media mirror back into this folder.
+      - media_data:/app/public/media
       - secrets:/run/within-secrets:ro
-      - ./backups:/backup
+      - *backup_dir
     networks: [within]
 
 configs:

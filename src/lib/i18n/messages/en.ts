@@ -18,6 +18,7 @@ import { conflictCopiesMessages } from "./sections/conflictCopies"
 import { shareMessages } from "./sections/share"
 import { syncMessages } from "./sections/sync"
 import { errorsMessages } from "./sections/errors"
+import { errorPageMessages } from "./sections/errorPage"
 
 /** English (en-GB spelling and date order). */
 export const en: Messages = {
@@ -101,6 +102,41 @@ export const en: Messages = {
       statusNone: "No backup has run yet. Setup: docs/backup-restore.md.",
       statusUnavailable: "Backup status unavailable.",
       verifiedCounts: (e: number, m: number) => `Restore check verified: ${e} entries · ${m} media`,
+      nightlyToggle: "Nightly backup",
+      pausedSince: (d: string) => `Backup paused since ${d}`,
+      toggleFailed: "Could not switch — please try again.",
+      destUsage: (used: string, total: string, pct: number) => `Backup drive: ${used} of ${total} used (${pct} %)`,
+      destWarn: "The backup drive is getting full.",
+      destCritical: "The backup drive is almost full.",
+      restore: {
+        title: "Restore",
+        description: "Load an existing backup into this installation — for when the app was set up from scratch.",
+        notMounted: "Backup folder not mounted — see x-backup-dir in docker-compose.yml.",
+        noDumps: "No backup found.",
+        counts: (e: number, m: number) => `${e} entries · ${m} media`,
+        countsUnknown: "Count unknown (backup taken before this update)",
+        mediaNote: "Photos and videos are always restored to the state of the most recent backup, regardless of which database backup you pick.",
+        otherDevicesNote: "Afterwards, lock other devices once and choose \"Forgot PIN?\" on the lock screen to reset their local data — only then do they fully load the restored state.",
+        button: "Restore backup",
+        confirmTitle: "Restore this backup?",
+        confirmEmpty: (d: string, e: number, m: number) => `Restore the backup from ${d} with ${e} entries and ${m} media? This installation is empty, nothing is lost.`,
+        confirmEmptyUnknown: (d: string) => `Restore the backup from ${d}? This installation is empty, nothing is lost.`,
+        confirmOverwrite: (e: number, m: number) => `Warning: ${e} entries and ${m} media in this installation will be irreversibly replaced by the backup.`,
+        passwordLabel: "Password",
+        typeWordLabel: (w: string) => `Type ${w} to confirm`,
+        confirmAction: "Restore now",
+        wrongPassword: "Wrong password.",
+        runningTitle: "Restoring…",
+        runningText: "Database and media are being restored from the backup. This usually takes less than a minute. Please leave this page open.",
+        doneText: (d: string, e: number | null, m: number | null) =>
+          e === null || m === null ? `Done — state as of ${d}.` : `Done — state as of ${d}: ${e} entries · ${m} media.`,
+        reloadButton: "Reload app",
+        failedText: "Restore failed.",
+        failedTimeout: "The backup service did not pick up the request. Is the backup container running? Details: docs/backup-restore.md.",
+        lastRestore: (d: string, f: string) => `Last restore: ${d} from ${f}`,
+        lastRestoreFailed: "The last restore failed.",
+        close: "Close",
+      },
     },
     import: {
       title: "Import",
@@ -167,4 +203,5 @@ export const en: Messages = {
   share: shareMessages.en,
   sync: syncMessages.en,
   errors: errorsMessages.en,
+  errorPage: errorPageMessages.en,
 }

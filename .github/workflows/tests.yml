@@ -10,25 +10,36 @@ concurrency:
 
 jobs:
   test:
+    # Required check in the main branch protection — do not rename.
     name: Lint & unit tests
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      pull-requests: read # audit step reads the PR file list via gh api
+    env:
+      # Throwaway runner: nothing for the Testcontainers reaper (Ryuk) to clean up,
+      # and 8 parallel Postgres containers made "Failed to connect to Reaper" flaky.
+      TESTCONTAINERS_RYUK_DISABLED: "true"
+      NPM_CONFIG_FETCH_RETRIES: "5"
+      NPM_CONFIG_FETCH_RETRY_MAXTIMEOUT: "60000"
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # Node 20 is EOL (2026-04-30); testcontainers 12 and undici 8 need Node >= 22.
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
 
-      - name: Install system dependencies (ffmpeg/ffprobe for the video tests)
-        # apt-get update first: the runner image ships stale package lists.
-        run: sudo apt-get update -qq && sudo apt-get install -y ffmpeg
-
+      # ffmpeg is not installed: every ffmpeg/ffprobe caller is mocked in the unit
+      # tests (tests/video-thumbnail.test.ts mocks child_process, upload tests mock
+      # @/lib/video-thumbnail).
       - name: Install dependencies
-        run: npm ci
+        run: npm ci --prefer-offline
 
       - name: Lint
         run: npm run lint
@@ -45,5 +56,28 @@ jobs:
       - name: Scan for secrets (gitleaks)
         run: /tmp/gitleaks detect --source . --config .gitleaks.toml --redact --no-git
 
-      - name: Audit dependencies (npm audit)
-        run: npm audit --audit-level=high --omit=dev
+      # Jan, 2026-09-09: npm audit blocks only PRs that change the dependency list.
+      # Advisories in unchanged dependencies are reported weekly by audit-weekly.yml;
+      # a registry outage is a warning, never a red PR.
+      - name: Audit dependencies (npm audit, only when package*.json changed)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          CHANGED=$(gh api "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files" \
+            --paginate --jq '.[].filename')
+          if ! grep -qxE 'package(-lock)?\.json' <<< "$CHANGED"; then
+            echo "package.json / package-lock.json unchanged — audit skipped (audit-weekly.yml covers advisories)."
+            exit 0
+          fi
+          set +e
+          OUT=$(timeout 120 npm audit --audit-level=high --omit=dev 2>&1); RC=$?
+          set -e
+          echo "$OUT"
+          if [ "$RC" -eq 0 ]; then exit 0; fi
+          # npm prints "npm ERR!"/"npm error" only for tooling/registry failures
+          # (ENAUDITENDPOINT, E4xx/E5xx, ETIMEDOUT); a real advisory report has none.
+          if [ "$RC" -eq 124 ] || grep -qE '^npm (ERR!|error)' <<< "$OUT"; then
+            echo "::warning::npm audit could not reach the registry (exit ${RC}) — not blocking; audit-weekly.yml re-checks."
+            exit 0
+          fi
+          exit "$RC"

@@ -70,7 +70,8 @@ describe("Middleware config.matcher — PWA static assets exemption", () => {
     const [pattern] = config.matcher
     const m = pattern.match(/\(\?!([^)]+)\)/)
     if (!m) throw new Error("matcher pattern has unexpected format")
-    return m[1].split("|").map((e) => e.replace(/\\\./g, "."))
+    // Trailing "$" anchors an exact path (api/upload$ must not swallow api/uploads).
+    return m[1].split("|").map((e) => e.replace(/\\\./g, ".").replace(/\$$/, ""))
   }
 
   function isExcluded(assetName: string): boolean {
@@ -99,6 +100,11 @@ describe("Middleware config.matcher — PWA static assets exemption", () => {
   it("excludes _next/static prefix", () => {
     expect(isExcluded("_next/static")).toBe(true)
     expect(isExcluded("_next/static/chunks/main.js")).toBe(true)
+  })
+
+  it("excludes api/upload and api/import — their bodies must not be cloned into RAM by Next; the guard lives in the routes", () => {
+    expect(isExcluded("api/upload")).toBe(true)
+    expect(isExcluded("api/import")).toBe(true)
   })
 
   it("does not exclude regular page paths", () => {

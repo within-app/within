@@ -42,6 +42,12 @@ const nextConfig: NextConfig = {
     proxyClientMaxBodySize: 105 * 1024 * 1024, // 105 MiB — matches maxRequestBodySize
   },
   serverExternalPackages: ["sharp"],
+  // Bild-Optimizer aus: next/image wird nirgends benutzt, der Endpunkt
+  // /_next/image ist aber ohne Login erreichbar (Proxy-Matcher nimmt ihn aus)
+  // — toter, angreifbarer Code (GHSA-2xp9-vwfh-vxw4: RCE über AVIF genau dort).
+  // Mit unoptimized antwortet next-server.js dort 404, bevor ein Parameter
+  // gelesen wird (tests/image-optimizer-off.test.ts).
+  images: { unoptimized: true },
   async headers() {
     return [
       {

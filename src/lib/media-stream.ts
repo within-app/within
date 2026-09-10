@@ -1,5 +1,5 @@
 import { createReadStream } from "fs"
-import { Readable } from "stream"
+import { ReadableStream as NodeReadableStream } from "stream/web"
 
 /**
  * Parse a Range header against a known file size.
@@ -68,6 +68,11 @@ export function createMediaStream(
   start: number,
   end: number
 ): ReadableStream {
-  const nodeStream = createReadStream(filePath, { start, end })
-  return Readable.toWeb(nodeStream) as ReadableStream
+  // Not Readable.toWeb: its 'data' listener enqueues a chunk the fs stream
+  // already buffered into a controller the client just cancelled (seek /
+  // dropped connection) — a synchronous ERR_INVALID_STATE in an event handler,
+  // i.e. an uncaughtException (tests/media-stream-cancel.test.ts). Pulling the
+  // async iterator only enqueues inside pull(), and cancel() destroys the fs
+  // stream via iterator.return().
+  return NodeReadableStream.from(createReadStream(filePath, { start, end })) as ReadableStream
 }

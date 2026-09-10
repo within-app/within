@@ -24,6 +24,7 @@ import { isFilterActive } from "@/lib/timeline/filter-utils"
 import { chainSequential } from "@/lib/sync/run-chain"
 import { applyCachedMediaToGroups } from "@/lib/sync/entry-media-cache"
 import { useI18n } from "@/components/locale-provider"
+import { abortAfter } from "@/lib/network-first-timeout"
 
 function ViewSpinner() {
   return (
@@ -196,18 +197,36 @@ export function TimelineView({
   }, [])
 
 
-  // Reset accumulated entries whenever journal filter, search, view, or refresh nonce changes
+  /** Set by the reset effect, consumed by the fetch effect: page 1 after a
+   *  reset shows the skeleton; page 1 on returning to the timeline is a
+   *  revalidation — the old cards stay until fresh data lands. */
+  const resetPendingRef = useRef(false)
+
+  // Reset accumulated entries whenever journal filter, search, or refresh nonce
+  // changes. NOT on viewMode: a tab switch (calendar and back) keeps the loaded
+  // entries. `loading` is set by the fetch effect only.
   useEffect(() => {
     setPage(1)
     setAllDateGroups([])
     setTotalEntries(0)
     setHasNextPage(false)
-    if (viewMode === "timeline") setLoading(true)
-  }, [journalId, searchQuery, starred, filterTagsKey, mediaType, before, pinned, viewMode, refreshNonce])
+    resetPendingRef.current = true
+  }, [journalId, searchQuery, starred, filterTagsKey, mediaType, before, pinned, refreshNonce])
 
-  // Fetch entries — appends on page > 1, replaces on page 1
+  // Leaving the timeline rewinds to page 1 so the return revalidates page 1
+  // with exactly one request instead of appending page N. While hidden the
+  // fetch effect below does nothing (the page change alone triggers no load).
+  useEffect(() => {
+    if (viewMode !== "timeline") setPage(1)
+  }, [viewMode])
+
+  // Fetch entries — appends on page > 1, replaces on page 1. Only while the
+  // timeline is visible; a return revalidates page 1 (sync-pulled entries
+  // arrive without a refreshNonce bump) — with a skeleton only after a reset.
   useEffect(() => {
     if (viewMode !== "timeline") return
+    const fresh = resetPendingRef.current
+    resetPendingRef.current = false
 
     // Filter „Offline verfügbar": Quelle ist der lokale Pin-Store —
     // der Server wird nie gefragt, online und Flugmodus verhalten sich
@@ -219,7 +238,7 @@ export function TimelineView({
     // kennt beide nicht — vorbestehende Grenze, kein neuer Kontrakt).
     if (pinned) {
       let cancelled = false
-      setLoading(true)
+      if (fresh) setLoading(true)
       const loadPinnedView = async () => {
         try {
           const [idbEntries, pins, pendingQueue, pendingMedia] = await Promise.all([
@@ -281,13 +300,18 @@ export function TimelineView({
     }
 
     const controller = new AbortController()
+    // Pi unreachable while online: abort after 6 s so the IDB fallback shows.
+    // Page 1 only — later pages have no fallback, and an abort there rewinds
+    // the page counter and scrolls the user back to the top.
+    const clearAbortTimer = page === 1 ? abortAfter(controller) : () => {}
     // abort() only stops the fetch — the async continuation below keeps
     // running through its IDB awaits. Without this flag a stale run overwrites
     // the state of a newer filter/journal combination.
     let cancelled = false
 
-    if (page === 1) setLoading(true)
-    else setLoadingMore(true)
+    if (page === 1) {
+      if (fresh) setLoading(true)
+    } else setLoadingMore(true)
 
     const params = new URLSearchParams({ page: String(page), perPage: "25" })
     if (journalId) params.set("journalId", journalId)
@@ -298,7 +322,7 @@ export function TimelineView({
     if (activeFilters.before) params.set("before", activeFilters.before)
 
     fetch(`/api/entries?${params}`, { signal: controller.signal })
-      .then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json() })
+      .then((r) => { clearAbortTimer(); if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json() })
       .then(async (data: PaginatedTimeline) => {
         if (cancelled) return
         if (page === 1) {
@@ -354,7 +378,8 @@ export function TimelineView({
         setLoadingMore(false)
       })
       .catch(async (err: unknown) => {
-        if ((err as Error).name === "AbortError") return
+        // Only the cleanup abort is "not our run" — a timeout abort falls
+        // through to the IDB fallback like any other network failure.
         if (cancelled) return
         // Network failed on page 1 — try reading from IndexedDB (offline fallback)
         if (page === 1) {
@@ -426,6 +451,7 @@ export function TimelineView({
 
     return () => {
       cancelled = true
+      clearAbortTimer()
       controller.abort()
     }
   }, [journalId, searchQuery, starred, filterTagsKey, mediaType, before, pinned, page, viewMode, refreshNonce])

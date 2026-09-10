@@ -37,6 +37,14 @@ describe("schema.sql — fresh-DB regression", () => {
     await expect(client.query(schema)).resolves.toBeDefined()
   }, 30_000)
 
+  it("backup_runs.status accepts 'skipped' (paused nights) and the block is idempotent on a second apply", async () => {
+    await client.query(readFileSync(SCHEMA_PATH, "utf-8"))
+    await expect(
+      client.query("INSERT INTO backup_runs (status, error_msg) VALUES ('skipped', 'backup paused since x')")
+    ).resolves.toBeDefined()
+    await expect(client.query("INSERT INTO backup_runs (status) VALUES ('bogus')")).rejects.toThrow()
+  }, 30_000)
+
   it("Zeitzone P4: idx_entries_month_day and month_day_utc() are gone (superseded by a zoned function, no functional index)", async () => {
     const indexResult = await client.query<{ indexdef: string }>(`
       SELECT indexdef FROM pg_indexes

@@ -42,4 +42,17 @@ describe("db pool error handler", () => {
     // Pool constructor should only be called once (singleton reuse on hot-reload)
     expect(PoolCtor).toHaveBeenCalledTimes(1)
   })
+
+  it("sets server-side statement/idle-in-transaction timeouts, but no client-side query_timeout (zombie client)", async () => {
+    const PoolCtor = vi.fn(function Pool(this: unknown) {
+      return { on: vi.fn(), connect: vi.fn(), query: vi.fn(), end: vi.fn() }
+    })
+    vi.doMock("pg", () => ({ Pool: PoolCtor }))
+
+    await import("../src/lib/db")
+
+    const cfg = (PoolCtor.mock.calls[0] as unknown as [Record<string, unknown>])[0]
+    expect(cfg).toMatchObject({ statement_timeout: 120_000, idle_in_transaction_session_timeout: 60_000 })
+    expect(cfg).not.toHaveProperty("query_timeout")
+  })
 })

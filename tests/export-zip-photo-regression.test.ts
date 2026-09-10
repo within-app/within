@@ -16,7 +16,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest"
 import { writeFileSync, mkdirSync, mkdtempSync, rmSync } from "fs"
 import { join } from "path"
 import { tmpdir } from "os"
-import AdmZip from "adm-zip"
+import { unzipSync } from "fflate"
 import { createExportArchiveStream } from "../src/lib/export-stream"
 
 // ── helpers ─────────────────────────────────────────────────────────────────
@@ -73,12 +73,11 @@ describe("export ZIP photo bundling regression", () => {
       [{ absPath: photoA, zipName: `photos/${ENTRY_ID_A}/photo-synth-a.jpg` }]
     )
 
-    const buf = await streamToBuffer(stream)
-    const zip = new AdmZip(buf)
+    const zip = unzipSync(await streamToBuffer(stream))
 
-    const entry = zip.getEntry(`photos/${ENTRY_ID_A}/photo-synth-a.jpg`)
-    expect(entry).not.toBeNull()
-    expect(entry!.getData().toString()).toBe("SYNTHETIC_JPEG_CONTENT_A_NOT_REAL")
+    const entry = zip[`photos/${ENTRY_ID_A}/photo-synth-a.jpg`]
+    expect(entry).toBeDefined()
+    expect(Buffer.from(entry).toString()).toBe("SYNTHETIC_JPEG_CONTENT_A_NOT_REAL")
   })
 
   it("ZIP contains photos/<entryId>/<filename> for multiple entries", async () => {
@@ -91,20 +90,20 @@ describe("export ZIP photo bundling regression", () => {
       ]
     )
 
-    const buf = await streamToBuffer(stream)
-    const zip = new AdmZip(buf)
+    const zip = unzipSync(await streamToBuffer(stream))
 
-    const entryA = zip.getEntry(`photos/${ENTRY_ID_A}/photo-synth-a.jpg`)
-    const entryB = zip.getEntry(`photos/${ENTRY_ID_B}/photo-synth-b.jpg`)
+    const entryA = zip[`photos/${ENTRY_ID_A}/photo-synth-a.jpg`]
+    const entryB = zip[`photos/${ENTRY_ID_B}/photo-synth-b.jpg`]
 
-    expect(entryA).not.toBeNull()
-    expect(entryB).not.toBeNull()
-    expect(entryA!.getData().toString()).toBe("SYNTHETIC_JPEG_CONTENT_A_NOT_REAL")
-    expect(entryB!.getData().toString()).toBe("SYNTHETIC_JPEG_CONTENT_B_NOT_REAL")
+    expect(entryA).toBeDefined()
+    expect(entryB).toBeDefined()
+    expect(Buffer.from(entryA).toString()).toBe("SYNTHETIC_JPEG_CONTENT_A_NOT_REAL")
+    expect(Buffer.from(entryB).toString()).toBe("SYNTHETIC_JPEG_CONTENT_B_NOT_REAL")
 
     // Entry IDs must be in different folders — not collapsed to photos/<filename>
-    expect(entryA!.entryName).toContain(ENTRY_ID_A)
-    expect(entryB!.entryName).toContain(ENTRY_ID_B)
+    const names = Object.keys(zip)
+    expect(names.find((n) => n.endsWith("photo-synth-a.jpg"))).toContain(ENTRY_ID_A)
+    expect(names.find((n) => n.endsWith("photo-synth-b.jpg"))).toContain(ENTRY_ID_B)
   })
 
   it("export.json manifest is present alongside photo entries", async () => {
@@ -118,12 +117,11 @@ describe("export ZIP photo bundling regression", () => {
       [{ absPath: photoA, zipName: `photos/${ENTRY_ID_A}/photo-synth-a.jpg` }]
     )
 
-    const buf = await streamToBuffer(stream)
-    const zip = new AdmZip(buf)
+    const zip = unzipSync(await streamToBuffer(stream))
 
-    expect(zip.getEntry("export.json")).not.toBeNull()
-    expect(zip.getEntry(`photos/${ENTRY_ID_A}/photo-synth-a.jpg`)).not.toBeNull()
-    expect(zip.getEntries()).toHaveLength(2)
+    expect(zip["export.json"]).toBeDefined()
+    expect(zip[`photos/${ENTRY_ID_A}/photo-synth-a.jpg`]).toBeDefined()
+    expect(Object.keys(zip)).toHaveLength(2)
   })
 
   it("Pi stability gate: streaming a 15 MB photo keeps heap growth under 20 MB", async () => {

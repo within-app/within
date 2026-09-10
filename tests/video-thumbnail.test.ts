@@ -5,7 +5,8 @@
  * 1. probeDuration returns integer seconds from ffprobe JSON output
  * 2. extractPoster returns poster path on success, null on failure (no throw)
  * 3. generateLoopClip fires-and-forgets: returns void, writes DB on success,
- *    logs loudly (not silently) on ffmpeg failure
+ *    logs loudly (not silently) on ffmpeg failure; clips run one after
+ *    another (module-wide chain) — never N parallel decoders on the Pi
  * 4. Any binary-absent (ENOENT) error is logged, never propagated
  * 5. Hard timeout + SIGKILL for hanging ffmpeg/ffprobe processes
  *
@@ -259,6 +260,24 @@ describe("generateLoopClip()", () => {
     await new Promise((r) => setImmediate(r))
     expect(mockDbQuery).not.toHaveBeenCalled()
   })
+
+  it("serialises clips: the second ffmpeg spawns only after the first one closed", async () => {
+    const first = makeHangingProc()
+    // Second proc built lazily: makeProc schedules its close on creation, and
+    // it must fire after runClip has attached its listeners.
+    mockSpawn.mockReturnValueOnce(first).mockImplementationOnce(() => makeProc({ exitCode: 0 }))
+
+    generateLoopClip("/tmp/a.mp4", "/tmp/a.webp", "media-a")
+    generateLoopClip("/tmp/b.mp4", "/tmp/b.webp", "media-b")
+    await new Promise((r) => setImmediate(r))
+    expect(mockSpawn).toHaveBeenCalledTimes(1)
+    expect(mockSpawn.mock.calls[0][1]).toContain("/tmp/a.mp4")
+
+    first.emit("close", 0)
+    await new Promise((r) => setImmediate(r))
+    expect(mockSpawn).toHaveBeenCalledTimes(2)
+    expect(mockSpawn.mock.calls[1][1]).toContain("/tmp/b.mp4")
+  })
 })
 
 // ── Timeout + kill hardening ──────────────────────────────────────────────────
@@ -336,6 +355,7 @@ describe("FFMPEG_PATH + FFPROBE_PATH env-var override", () => {
     mockSpawn.mockReturnValueOnce(makeProc({ exitCode: 0 }))
 
     generateLoopClip("/tmp/video.mp4", "/tmp/loop.webp", "media-env-test")
+    await new Promise((r) => setImmediate(r)) // spawn happens on the clip chain
 
     expect(mockSpawn.mock.calls[0][0]).toBe("/opt/custom/ffmpeg")
   })

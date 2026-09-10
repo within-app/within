@@ -36,4 +36,10 @@ describe("Docker-Logging-Limits (B30)", () => {
     expect(loggingBlocks(compose)).toBeGreaterThanOrEqual(3)
   })
 
+  it("docker-compose.yml: app begrenzt den Node-Heap unter dem 1536-MB-Container-Limit", () => {
+    // Ohne Flag bemisst Node den Heap am physischen RAM des Pi, nicht am
+    // Container-Limit — der OOM-Killer trifft dann den ganzen Prozess.
+    expect(read("docker-compose.yml")).toContain('NODE_OPTIONS: "--max-old-space-size=768"')
+  })
+
 })

@@ -26,6 +26,7 @@ const SCRIPTS = [
   "backup-retention.sh",
   "backup-verify.sh",
   "loop.sh",
+  "restore.sh",
 ]
 
 for (const script of SCRIPTS) {

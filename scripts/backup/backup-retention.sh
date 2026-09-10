@@ -71,7 +71,7 @@ deleted=0
 for dump in "${all_dumps[@]}"; do
   if [[ -z "${keep_set[$dump]:-}" ]]; then
     echo "[$(date -u +%FT%TZ)] deleting ${dump}"
-    rm -f "$dump"
+    rm -f "$dump" "${dump}.meta.json"
     (( deleted++ )) || true
   fi
 done

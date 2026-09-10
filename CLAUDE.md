@@ -26,7 +26,7 @@ At the end, the user can open `https://<server address>` from a computer in the 
    ls -l certificate/within-root-ca.crt                      # exported root certificate
    curl -s --cacert certificate/within-root-ca.crt https://<address>/api/health   # → {"status":"ok",...}
    ```
-   If the app restarts in a loop, read `docker compose logs app`; the messages name the setting that is wrong.
+   If the app restarts in a loop, read `docker compose logs app`; the messages name the setting that is wrong. If `app` stays *unhealthy*, `/api/health` answers `503 {"status":"db_down"}` — the app cannot reach the database; read `docker compose logs db`.
 7. **Install the certificate on this computer if it is one of the user's devices** (macOS: copy to `/tmp`, then `sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain /tmp/within-root-ca.crt`; Debian/Ubuntu: copy to `/usr/local/share/ca-certificates/` and `sudo update-ca-certificates`). On a headless server skip this and tell the user to do it on their laptop (README, step 4).
 8. **Hand over.** Tell the user, in plain words: the address to open (`https://<address>`), that the browser must be **restarted** after installing the certificate, the password they chose, and the phone steps: open `http://<address>/within-root-ca.crt` on the phone, install it as a CA certificate, open `https://<address>`, then *Add to Home screen*. Point them to README.md → "If something does not work".
 9. **Backups** run by themselves every night into `./backups`. Recommend replacing that line with a folder on an external drive and show the exact line to change (README → Backups).

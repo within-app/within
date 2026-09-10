@@ -23,6 +23,23 @@ export interface BackupStatusRow {
   verify_entry_count?: number | null
   live_media_count?: number | null
   verify_media_count?: number | null
+  /** ISO time the nightly backup was switched off; null = on. */
+  pausedAt?: string | null
+  /** Filesystem behind the backup folder; null when it is not mounted. */
+  dest?: DestUsage | null
+}
+
+export interface DestUsage {
+  usedBytes: number
+  totalBytes: number
+}
+
+export type DestUsageLevel = "ok" | "warn" | "critical"
+
+/** Speicherort-Belegung: ab 80 % gelb, ab 95 % rot. */
+export function classifyDestUsage(d: DestUsage): DestUsageLevel {
+  const pct = d.totalBytes > 0 ? (d.usedBytes / d.totalBytes) * 100 : 0
+  return pct >= 95 ? "critical" : pct >= 80 ? "warn" : "ok"
 }
 
 export function classifyBackupStatus(

@@ -5,7 +5,10 @@ import { logWarn } from "@/lib/logger"
  * Tag-Verknüpfungen eines Eintrags ersetzen (replace-all) — innerhalb der
  * Schreib-Transaktion des Aufrufers (PUT, DELETE-Tombstone, Sync-Upsert).
  * Leere Namen fallen hier raus (der Sync-Pfad liefert Zod-getrimmt, aber
- * ungefiltert). Liefert die IDs der Tags, die der Eintrag dabei verloren hat —
+ * ungefiltert). ORDER BY 1: der Upsert sperrt bestehende Tag-Zeilen in
+ * Namensreihenfolge — ohne das nimmt er sie in Hash-Reihenfolge, und zwei
+ * Geräte mit denselben Tags verklemmen sich (Deadlock) trotz sortierter
+ * Einträge. Liefert die IDs der Tags, die der Eintrag dabei verloren hat —
  * Kandidaten für deleteOrphanTags() NACH dem COMMIT.
  */
 export async function replaceEntryTags(
@@ -21,7 +24,7 @@ export async function replaceEntryTags(
   const kept = new Set<string>()
   if (names.length > 0) {
     const { rows: tagRows } = await client.query<{ id: string }>(
-      `INSERT INTO tags (name) SELECT DISTINCT UNNEST($1::text[])
+      `INSERT INTO tags (name) SELECT DISTINCT UNNEST($1::text[]) ORDER BY 1
        ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name
        RETURNING id`,
       [names]
@@ -45,7 +48,7 @@ export async function replaceEntryTags(
  * NACH dem COMMIT der Schreib-Transaktion aufrufen, je Tag eine eigene
  * Mini-Transaktion mit genau einer Zeilensperre: Wer nichts hält, während er
  * wartet, kann nicht Teil eines Deadlock-Zyklus sein. Innerhalb der Schreib-
- * Transaktion (Eintragszeile gesperrt, Upsert-Sperren in Plan-Reihenfolge)
+ * Transaktion (Eintragszeile gesperrt, Upsert-Sperren damals in Plan-Reihenfolge)
  * waren zwei neue Deadlock-Klassen reproduzierbar.
  * Zwei Statements sind tragend: FOR UPDATE wartet auf den ON-CONFLICT-Upsert
  * eines anderen Geräts, das frische DELETE sieht danach dessen Verknüpfung —
@@ -70,9 +73,7 @@ export async function deleteOrphanTags(client: PoolClient, ids: string[]): Promi
       await client.query("COMMIT")
     } catch (err) {
       await client.query("ROLLBACK").catch(() => {})
-      // Prod-Logger schreibt nur den Kontext — den Postgres-Code mitgeben.
-      const code = (err as { code?: string } | null)?.code ?? "?"
-      logWarn(`[tags] Waisen-Aufräumen fehlgeschlagen (code=${code}; Sweep holt nach):`, err)
+      logWarn("[tags] Waisen-Aufräumen fehlgeschlagen, Sweep holt nach", err)
     }
   }
 }

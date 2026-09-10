@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest"
 import { writeFileSync, mkdtempSync, rmSync } from "fs"
 import { join } from "path"
 import { tmpdir } from "os"
-import AdmZip from "adm-zip"
+import { unzipSync } from "fflate"
 import { createExportArchiveStream } from "../src/lib/export-stream"
 
 // ── helper ─────────────────────────────────────────────────────────────────
@@ -50,10 +50,9 @@ describe("createExportArchiveStream", () => {
     const buf = await streamToBuffer(stream)
 
     expect(buf.length).toBeGreaterThan(0)
-    const zip = new AdmZip(buf)
-    const entry = zip.getEntry("export.json")
-    expect(entry).not.toBeNull()
-    const content = entry!.getData().toString("utf8")
+    const entry = unzipSync(buf)["export.json"]
+    expect(entry).toBeDefined()
+    const content = Buffer.from(entry).toString("utf8")
     expect(JSON.parse(content)).toEqual({ version: "1.0", entries: [] })
   })
 
@@ -64,10 +63,9 @@ describe("createExportArchiveStream", () => {
     ])
     const buf = await streamToBuffer(stream)
 
-    const zip = new AdmZip(buf)
-    const photoEntry = zip.getEntry("photos/abc123/photo-synth.jpg")
-    expect(photoEntry).not.toBeNull()
-    expect(photoEntry!.getData().toString()).toBe("SYNTHETIC_JPEG_PLACEHOLDER_NOT_REAL")
+    const photoEntry = unzipSync(buf)["photos/abc123/photo-synth.jpg"]
+    expect(photoEntry).toBeDefined()
+    expect(Buffer.from(photoEntry).toString()).toBe("SYNTHETIC_JPEG_PLACEHOLDER_NOT_REAL")
   })
 
   it("streaming a 15 MB file keeps heap growth under 20 MB", async () => {

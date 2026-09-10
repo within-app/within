@@ -16,6 +16,8 @@ import { zipSync, strToU8 } from "fflate"
 
 // ── Mocks ─────────────────────────────────────────────────────────────────
 
+// Session + rate limit are proven in tests/api-guard-bypass-proxy.test.ts.
+vi.mock("@/lib/request-guard", () => ({ guardApiRequest: async () => null }))
 vi.mock("@/lib/db", () => ({
   db: {
     query: vi.fn(),
@@ -55,6 +57,7 @@ vi.mock("fs", () => {
 
 vi.mock("sharp", () => ({
   default: vi.fn(() => ({
+    metadata: vi.fn().mockResolvedValue({ format: "jpeg" }),
     rotate: vi.fn().mockReturnThis(),
     resize: vi.fn().mockReturnThis(),
     webp: vi.fn().mockReturnThis(),

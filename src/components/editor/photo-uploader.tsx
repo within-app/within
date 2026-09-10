@@ -191,13 +191,15 @@ export function PhotoUploader({ initialPhotos = [], entryId, ensureEntryId, onCh
       return
     }
 
-    const fd = new FormData()
-    fd.append("file", file)
-    if (entryId) fd.append("clientMediaId", clientMediaId)
-    const url = entryId ? `/api/upload?entryId=${entryId}` : "/api/upload"
+    const url = entryId ? `/api/upload?entryId=${entryId}&clientMediaId=${clientMediaId}` : "/api/upload"
 
     try {
-      const res = await fetch(url, { method: "POST", body: fd })
+      // Raw body, no multipart: the server streams it straight to disk.
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "content-type": file.type },
+        body: file,
+      })
       if (!res.ok) {
         // Das File darf hier NIE verworfen werden —
         // eine Kamera-Aufnahme existiert nur in diesem Objekt. In die Outbox

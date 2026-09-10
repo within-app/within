@@ -32,6 +32,7 @@ import {
 import { loadPendingMediaForEntry } from "@/lib/sync/pending-media-preview"
 import { revokePreviewUrls } from "@/lib/sync/preview-urls"
 import { useI18n } from "@/components/locale-provider"
+import { abortAfter } from "@/lib/network-first-timeout"
 
 /** Pure helper — exported for unit testing. */
 export function entryDetailFavouriteClasses(starred: boolean): string {
@@ -112,6 +113,8 @@ export function EntryDetail({ entryId, onBack, onEdit, reloadNonce = 0, onDelete
 
   useEffect(() => {
     const controller = new AbortController()
+    // Pi unreachable while online: abort after 6 s so the IDB fallback shows.
+    const clearAbortTimer = abortAfter(controller)
     /** Preview URLs this run created — revoked when it tears down. */
     const previewUrls: string[] = []
     let cancelled = false
@@ -124,6 +127,7 @@ export function EntryDetail({ entryId, onBack, onEdit, reloadNonce = 0, onDelete
       let listUnknown = false
       try {
         const res = await fetch(`/api/entries/${entryId}`, { signal: controller.signal })
+        clearAbortTimer()
         // 404 is a server-side CONFIRMED "gone", not a network failure —
         // the IDB fallback would resurrect the deleted entry (tombstone not
         // pulled yet) complete with its cached photos. Show not-found and drop
@@ -142,8 +146,10 @@ export function EntryDetail({ entryId, onBack, onEdit, reloadNonce = 0, onDelete
         // all, and an offline attachment would look like it replaced them.
         // Fire-and-forget: the view does not depend on the write order.
         void cacheEntryMedia(realIDBAdapter, entryId, loaded.media, loaded.updatedAt)
-      } catch (err) {
-        if ((err as Error).name === "AbortError") return
+      } catch {
+        // Only the cleanup abort is "not our run" — a timeout abort falls
+        // through to the IDB fallback like any other network failure.
+        if (cancelled) return
         // Network failed — try the local IDB store as offline fallback
         try {
           const idbEntry = await realIDBAdapter.getEntry(entryId)
@@ -191,6 +197,7 @@ export function EntryDetail({ entryId, onBack, onEdit, reloadNonce = 0, onDelete
 
     return () => {
       cancelled = true
+      clearAbortTimer()
       controller.abort()
       revokePreviewUrls(previewUrls)
     }

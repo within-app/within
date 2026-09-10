@@ -19,6 +19,7 @@ import { describe, it, expect } from "vitest"
 import {
   BACKUP_STALE_HOURS,
   classifyBackupStatus,
+  classifyDestUsage,
   type BackupStatusRow,
 } from "../src/lib/backup-status"
 
@@ -74,5 +75,41 @@ describe("Settings-Seite konsumiert den Status (Source-Contract)", () => {
     const page = readFileSync(resolve(__dirname, "../src/app/settings/page.tsx"), "utf8")
     expect(page).toContain("classifyBackupStatus")
     expect(page).toContain("/api/backup/status")
+  })
+})
+
+describe("classifyDestUsage (PR F — Speicherort-Belegung)", () => {
+  const GB = 1024 ** 3
+  it("unter 80 % ok, ab 80 % warn, ab 95 % critical", () => {
+    expect(classifyDestUsage({ usedBytes: 0.077 * GB, totalBytes: 7.3 * GB })).toBe("ok")
+    expect(classifyDestUsage({ usedBytes: 79 * GB, totalBytes: 100 * GB })).toBe("ok")
+    expect(classifyDestUsage({ usedBytes: 80 * GB, totalBytes: 100 * GB })).toBe("warn")
+    expect(classifyDestUsage({ usedBytes: 94 * GB, totalBytes: 100 * GB })).toBe("warn")
+    expect(classifyDestUsage({ usedBytes: 95 * GB, totalBytes: 100 * GB })).toBe("critical")
+  })
+  it("totalBytes 0 (nichts eingehängt) → ok, keine Division durch null", () => {
+    expect(classifyDestUsage({ usedBytes: 0, totalBytes: 0 })).toBe("ok")
+  })
+})
+
+describe("Settings-Karte: Pause-Schalter und Belegung (Source-Contract)", () => {
+  it("page.tsx schaltet über PUT /api/backup/pause, zeigt pausedSince und nutzt classifyDestUsage", async () => {
+    const { readFileSync } = await import("fs")
+    const { resolve } = await import("path")
+    const page = readFileSync(resolve(__dirname, "../src/app/settings/page.tsx"), "utf8")
+    expect(page).toContain("/api/backup/pause")
+    expect(page).toContain("classifyDestUsage")
+    expect(page).toContain("m.pausedSince(")
+    expect(page).toContain("m.destUsage(")
+  })
+  it("Review #532: kein rotes 'läuft nicht mehr' während der Pause, Switch gegen Doppelklick gesperrt, Belegung lokalisiert", async () => {
+    const { readFileSync } = await import("fs")
+    const { resolve } = await import("path")
+    const page = readFileSync(resolve(__dirname, "../src/app/settings/page.tsx"), "utf8")
+    expect(page).toContain('const bad = !paused && (level === "error" || level === "stale")')
+    expect(page).toContain('paused && level === "stale" ? null')
+    expect(page).toContain("disabled={busy}")
+    expect(page).toContain("formatBytes(dest.usedBytes, locale)")
+    expect(page).toMatch(/toLocaleString\(locale, \{ maximumFractionDigits: 1 \}\)/)
   })
 })

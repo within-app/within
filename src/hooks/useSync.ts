@@ -38,6 +38,29 @@ export function isLoginPath(pathname: string | null | undefined): boolean {
   return pathname === "/login" || (pathname?.startsWith("/login/") ?? false)
 }
 
+/** Session tot bei ERREICHBAREM Server: seit dem Navigations-Timeout im SW
+ *  (#528) hydriert die App auch bei langsamem Server aus der gecachten Shell,
+ *  die 307 nach /login kommt nie an — der Nutzer sähe eine eingeloggte App,
+ *  jeder Request liefert 401, die Outbox syncet nie (bestand schon für
+ *  „offline → online mit abgelaufener Session"). Feuert nur auf authRequired
+ *  (die Engine setzt es allein bei einer echten 401/403-Probe, nie bei
+ *  Netzfehler/Timeout), nur online, einmal pro Sitzung — und nie im Editor
+ *  (/entry/…): dort hält React den Text nur im State (Autosave 30 s), ein
+ *  harter Reload würfe ihn weg; die nächste Navigation weg vom Editor läuft
+ *  ohnehin in die 307 des Proxys. */
+let loginRedirected = false
+export function redirectToLoginIfSessionExpired(
+  result: SyncResult,
+  pathname: string | null | undefined,
+  assign: (url: string) => void = (url) => window.location.assign(url)
+): boolean {
+  if (!result.authRequired || !navigator.onLine || loginRedirected) return false
+  if (pathname?.startsWith("/entry/")) return false
+  loginRedirected = true
+  assign("/login")
+  return true
+}
+
 export interface SyncState {
   online: boolean
   syncing: boolean
@@ -151,6 +174,7 @@ export function useSync(): SyncState & { triggerSync: () => Promise<void> } {
         // lastResult-Nonce-Bump; nach dem Login triggert der Pathname-Effekt.
         if (result.authRequired) {
           await refreshCounts()
+          redirectToLoginIfSessionExpired(result, pathnameRef.current)
           return
         }
         // Name both failure kinds — a stuck photo is as invisible on a phone as a

@@ -18,10 +18,14 @@ import { NextRequest } from "next/server"
 const mockMkdir = vi.fn().mockResolvedValue(undefined)
 const mockWriteFile = vi.fn().mockResolvedValue(undefined)
 const mockRm = vi.fn().mockResolvedValue(undefined)
-vi.mock("fs/promises", () => ({ mkdir: mockMkdir, writeFile: mockWriteFile, rm: mockRm }))
+const mockRename = vi.fn().mockResolvedValue(undefined)
+vi.mock("fs/promises", () => ({ mkdir: mockMkdir, writeFile: mockWriteFile, rm: mockRm, rename: mockRename }))
 
-const mockSaveFileToDisk = vi.fn().mockResolvedValue(undefined)
-vi.mock("@/lib/upload-stream", () => ({ saveFileToDisk: mockSaveFileToDisk }))
+const mockSaveBodyToDisk = vi.fn().mockResolvedValue(0)
+vi.mock("@/lib/upload-stream", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/upload-stream")>()),
+  saveBodyToDisk: mockSaveBodyToDisk,
+}))
 
 const mockExtractPoster = vi.fn().mockResolvedValue("/media/synth-uuid/poster.webp")
 const mockGenerateLoopClip = vi.fn()
@@ -35,6 +39,8 @@ vi.mock("@/lib/video-thumbnail", () => ({
 }))
 
 const mockDbQuery = vi.fn()
+// Session + rate limit are proven in tests/api-guard-bypass-proxy.test.ts.
+vi.mock("@/lib/request-guard", () => ({ guardApiRequest: async () => null }))
 vi.mock("@/lib/db", () => ({ db: { query: mockDbQuery } }))
 
 vi.mock("@/lib/logger", () => ({ logError: vi.fn(), logWarn: vi.fn() }))
@@ -49,10 +55,9 @@ const { POST } = await import("@/app/api/upload/route")
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 /**
- * Build a mock NextRequest whose formData() returns a single file-like object
- * with controlled type and size. The stream() / arrayBuffer() are never used
- * by the video/audio path (saveFileToDisk is mocked) — they are present to
- * satisfy the File interface.
+ * Raw-body request: the file's MIME type travels as content-type, its size as
+ * content-length. The body itself is never read by the video/audio path
+ * (saveBodyToDisk is mocked) — a tiny stream stands in for it.
  */
 function makeUploadReq(opts: {
   fileType: string
@@ -60,21 +65,15 @@ function makeUploadReq(opts: {
   entryId?: string
 }) {
   const url = `http://localhost/api/upload${opts.entryId ? `?entryId=${opts.entryId}` : ""}`
-  const req = new NextRequest(url, { method: "POST" })
-
-  const mockFile = {
-    type: opts.fileType,
-    size: opts.fileSize ?? 512 * 1024, // 512 KB synthetic default
-    name: "synthetic-media",
-    stream: () => new ReadableStream<Uint8Array>(),
-    arrayBuffer: async () => new ArrayBuffer(0),
-  }
-
-  vi.spyOn(req, "formData").mockResolvedValue({
-    get: (key: string) => (key === "file" ? mockFile : null),
-  } as unknown as FormData)
-
-  return req
+  return new NextRequest(url, {
+    method: "POST",
+    headers: {
+      "content-type": opts.fileType,
+      "content-length": String(opts.fileSize ?? 512 * 1024), // 512 KB synthetic default
+    },
+    body: new ReadableStream<Uint8Array>({ start(c) { c.enqueue(new Uint8Array(1)); c.close() } }),
+    duplex: "half",
+  } as ConstructorParameters<typeof NextRequest>[1])
 }
 
 /**
@@ -247,17 +246,67 @@ describe("upload route — DB row type", () => {
     expect(mockExtractPoster).not.toHaveBeenCalled()
   })
 
-  it("video upload: saveFileToDisk streams file — arrayBuffer never called", async () => {
-    const req = makeUploadReq({ fileType: "video/mp4", entryId: "e-1" })
-    // formData mock already has arrayBuffer: () => { throw } behaviour
-    // We verify saveFileToDisk was called (streaming path) and the route returned 201
-    await POST(req)
-    expect(mockSaveFileToDisk).toHaveBeenCalledOnce()
+  it("video upload: saveBodyToDisk streams the raw body with the video byte cap", async () => {
+    await POST(makeUploadReq({ fileType: "video/mp4", entryId: "e-1" }))
+    expect(mockSaveBodyToDisk).toHaveBeenCalledOnce()
+    expect(mockSaveBodyToDisk.mock.calls[0][2]).toBe(100 * 1024 * 1024)
   })
 
-  it("audio upload: saveFileToDisk streams file — arrayBuffer never called", async () => {
+  it("audio upload: saveBodyToDisk streams the raw body with the audio byte cap", async () => {
     await POST(makeUploadReq({ fileType: "audio/mpeg", entryId: "e-1" }))
-    expect(mockSaveFileToDisk).toHaveBeenCalledOnce()
+    expect(mockSaveBodyToDisk).toHaveBeenCalledOnce()
+    expect(mockSaveBodyToDisk.mock.calls[0][2]).toBe(50 * 1024 * 1024)
+  })
+})
+
+// ── Raw-body transport ────────────────────────────────────────────────────────
+
+describe("upload route — raw-body transport", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    seedDb()
+  })
+
+  it("transitional: multipart from a pre-#530 client still works — same stream-to-disk path", async () => {
+    const fd = new FormData()
+    fd.append("file", new File([new Uint8Array(1024)], "synthetic.mp4", { type: "video/mp4" }))
+    const res = await POST(new NextRequest("http://localhost/api/upload?entryId=e-1", { method: "POST", body: fd }))
+    expect(res.status).toBe(201)
+    expect((await res.json() as { type: string }).type).toBe("video")
+    expect(mockSaveBodyToDisk).toHaveBeenCalledOnce()
+    expect(mockSaveBodyToDisk.mock.calls[0][2]).toBe(100 * 1024 * 1024)
+  })
+
+  it("transitional: multipart without a file field → 400 no_file", async () => {
+    const fd = new FormData()
+    fd.append("other", "x")
+    const res = await POST(new NextRequest("http://localhost/api/upload", { method: "POST", body: fd }))
+    expect(res.status).toBe(400)
+    expect((await res.json() as { code: string }).code).toBe("no_file")
+  })
+
+  it("rejects a body without content-length with 411 before touching the disk", async () => {
+    const req = new NextRequest("http://localhost/api/upload?entryId=e-1", {
+      method: "POST",
+      headers: { "content-type": "audio/mpeg" },
+      body: new ReadableStream<Uint8Array>({ start(c) { c.close() } }),
+      duplex: "half",
+    } as ConstructorParameters<typeof NextRequest>[1])
+    const res = await POST(req)
+    expect(res.status).toBe(411)
+    const body = await res.json() as { code: string }
+    expect(body.code).toBe("length_required")
+    expect(mockMkdir).not.toHaveBeenCalled()
+  })
+
+  it("fail-safe: a body longer than content-length announces is cut off and cleaned up", async () => {
+    const { UploadTooLargeError } = await import("@/lib/upload-stream")
+    mockSaveBodyToDisk.mockRejectedValueOnce(new UploadTooLargeError())
+    const res = await POST(makeUploadReq({ fileType: "audio/mpeg", entryId: "e-1" }))
+    expect(res.status).toBe(400)
+    const body = await res.json() as { code: string }
+    expect(body.code).toBe("file_too_large")
+    expect(mockRm).toHaveBeenCalledOnce()
   })
 })
 

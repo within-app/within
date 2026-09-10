@@ -51,5 +51,5 @@ tests/e2e/.auth-state.json
 tests/e2e/test-results/
 tests/e2e/report/
 
-# MapLibre worker pair — copied from node_modules by scripts/copy-map-worker.mjs
-public/map/*.mjs
+# MapLibre worker pair — copied to public/map/<version>/ by scripts/copy-map-worker.mjs
+public/map/[0-9]*/

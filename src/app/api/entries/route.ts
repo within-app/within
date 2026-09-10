@@ -50,10 +50,11 @@ export async function POST(req: NextRequest) {
     if (photos.length > 0) {
       await client.query(
         `INSERT INTO media (entry_id, type, file_path, thumbnail_path, order_index)
-         SELECT $1::uuid, 'photo', f, t, o
-         FROM UNNEST($2::text[], $3::text[], $4::int[]) AS u(f, t, o)`,
+         SELECT $1::uuid, ty, f, t, o
+         FROM UNNEST($2::text[], $3::text[], $4::text[], $5::int[]) AS u(ty, f, t, o)`,
         [
           entryId,
+          photos.map(p => p.type ?? "photo"),
           photos.map(p => p.filePath),
           photos.map(p => p.thumbnailPath ?? null),
           photos.map((_, i) => i),

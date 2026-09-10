@@ -135,6 +135,10 @@ describe("classifyUploadResponse", () => {
     expect(classifyUploadResponse({ ok: false, status: 409, body: null })).toBe("retry")
   })
 
+  it("behandelt 429 (API-Limit 60/min) als wiederholbar — 40 Urlaubsfotos dürfen nicht endgültig verloren gehen", () => {
+    expect(classifyUploadResponse({ ok: false, status: 429, body: null })).toBe("retry")
+  })
+
   it("wertet 410 (Eintrag gelöscht) als verwaist, nicht als abgelehnt", () => {
     // Ein gelöschter Eintrag bekommt nie wieder eine media-Zeile: das Item soll
     // aus der Outbox verschwinden statt ewig als „stuck" gemeldet zu werden.

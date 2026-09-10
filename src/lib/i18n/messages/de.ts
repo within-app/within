@@ -17,6 +17,7 @@ import { conflictCopiesMessages } from "./sections/conflictCopies"
 import { shareMessages } from "./sections/share"
 import { syncMessages } from "./sections/sync"
 import { errorsMessages } from "./sections/errors"
+import { errorPageMessages } from "./sections/errorPage"
 
 /**
  * Kanonisches UI-Wörterbuch — Deutsch ist die Quelle der Wahrheit.
@@ -107,6 +108,41 @@ export const de = {
       statusNone: "Noch kein Backup gelaufen. Einrichtung: docs/backup-restore.md.",
       statusUnavailable: "Backup-Status nicht abrufbar.",
       verifiedCounts: (e: number, m: number) => `Restore-Probe geprüft: ${e} Einträge · ${m} Medien`,
+      nightlyToggle: "Nächtliche Sicherung",
+      pausedSince: (d: string) => `Backup pausiert seit ${d}`,
+      toggleFailed: "Umschalten fehlgeschlagen — bitte erneut versuchen.",
+      destUsage: (used: string, total: string, pct: number) => `Speicherort: ${used} von ${total} belegt (${pct} %)`,
+      destWarn: "Der Speicherort wird knapp.",
+      destCritical: "Der Speicherort ist fast voll.",
+      restore: {
+        title: "Wiederherstellen",
+        description: "Eine vorhandene Sicherung in diese Installation einspielen — für den Fall, dass die App neu aufgesetzt wurde.",
+        notMounted: "Sicherungs-Ordner nicht eingehängt — siehe x-backup-dir in docker-compose.yml.",
+        noDumps: "Keine Sicherung gefunden.",
+        counts: (e: number, m: number) => `${e} Einträge · ${m} Medien`,
+        countsUnknown: "Anzahl unbekannt (Sicherung vor diesem Update)",
+        mediaNote: "Fotos und Videos werden immer auf den Stand der letzten Sicherung gesetzt, unabhängig von der gewählten Datenbank-Sicherung.",
+        otherDevicesNote: "Andere Geräte danach einmal sperren und auf dem Sperrbildschirm „PIN vergessen?“ wählen, um die lokalen Daten zurückzusetzen — erst so laden sie den wiederhergestellten Stand vollständig.",
+        button: "Sicherung einspielen",
+        confirmTitle: "Sicherung einspielen?",
+        confirmEmpty: (d: string, e: number, m: number) => `Sicherung vom ${d} mit ${e} Einträgen und ${m} Medien einspielen? Diese Installation ist leer, es geht nichts verloren.`,
+        confirmEmptyUnknown: (d: string) => `Sicherung vom ${d} einspielen? Diese Installation ist leer, es geht nichts verloren.`,
+        confirmOverwrite: (e: number, m: number) => `Achtung: ${e} Einträge und ${m} Medien in dieser Installation werden dabei unwiderruflich durch die Sicherung ersetzt.`,
+        passwordLabel: "Passwort",
+        typeWordLabel: (w: string) => `Zur Bestätigung ${w} eintippen`,
+        confirmAction: "Jetzt einspielen",
+        wrongPassword: "Falsches Passwort.",
+        runningTitle: "Wird wiederhergestellt…",
+        runningText: "Datenbank und Medien werden aus der Sicherung eingespielt. Das dauert normalerweise weniger als eine Minute. Diese Seite bitte geöffnet lassen.",
+        doneText: (d: string, e: number | null, m: number | null) =>
+          e === null || m === null ? `Fertig — Stand vom ${d}.` : `Fertig — Stand vom ${d}: ${e} Einträge · ${m} Medien.`,
+        reloadButton: "App neu laden",
+        failedText: "Wiederherstellung fehlgeschlagen.",
+        failedTimeout: "Der Backup-Dienst hat den Auftrag nicht abgeholt. Läuft der backup-Container? Details: docs/backup-restore.md.",
+        lastRestore: (d: string, f: string) => `Letzte Wiederherstellung: ${d} aus ${f}`,
+        lastRestoreFailed: "Die letzte Wiederherstellung ist fehlgeschlagen.",
+        close: "Schließen",
+      },
     },
     import: {
       title: "Importieren",
@@ -173,6 +209,7 @@ export const de = {
   share: shareMessages.de,
   sync: syncMessages.de,
   errors: errorsMessages.de,
+  errorPage: errorPageMessages.de,
 }
 
 export type Messages = typeof de

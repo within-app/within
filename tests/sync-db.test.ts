@@ -535,3 +535,30 @@ describe("upsertEntries — idempotent retry", () => {
     expect(conflictInsert).toBeUndefined()
   })
 })
+
+describe("upsertEntries — Sperrreihenfolge und ROLLBACK", () => {
+  beforeEach(() => vi.mocked(db.connect).mockReset())
+
+  it("sperrt die Zeilen (FOR UPDATE) in aufsteigender id-Reihenfolge, unabhängig von der Batch-Reihenfolge", async () => {
+    const lockOrder: string[] = []
+    const mockClient = makeClientMock((sql, params) => {
+      if (sql.includes("FOR UPDATE OF e")) lockOrder.push(params![0] as string)
+      return null
+    })
+    vi.mocked(db.connect).mockResolvedValue(mockClient as never)
+    await upsertEntries([makeSyncEntry(ENTRY_ID_B), makeSyncEntry(ENTRY_ID_A)])
+    expect(lockOrder).toEqual([ENTRY_ID_A, ENTRY_ID_B])
+  })
+
+  it("ROLLBACK auf toter Verbindung überdeckt den ursprünglichen Fehler nicht", async () => {
+    const original = Object.assign(new Error("connection terminated"), { code: "ECONNRESET" })
+    const mockClient = makeClientMock((sql) => {
+      if (sql === "BEGIN") return null
+      if (sql === "ROLLBACK") throw new Error("Client was closed and is not queryable")
+      throw original
+    })
+    vi.mocked(db.connect).mockResolvedValue(mockClient as never)
+    await expect(upsertEntries([makeSyncEntry(ENTRY_ID_A)])).rejects.toBe(original)
+    expect(mockClient.release).toHaveBeenCalledTimes(1)
+  })
+})

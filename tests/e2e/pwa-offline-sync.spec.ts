@@ -46,7 +46,10 @@ function makeSyncEntry(id: string, journalId: string, text: string): SyncEntry {
     text,
     createdAt: now,
     updatedAt: now,
-    revisionId: id.replace("ef0", "ef1"),
+    // Frische Revision pro Lauf: seit #531 erkennt der Server ein bereits
+    // gespeichertes revisionId als Wiederholung (accepted ohne Update) — mit
+    // fester ID fände der Pull den Eintrag beim zweiten Lauf nicht mehr.
+    revisionId: crypto.randomUUID(),
     starred: false,
     tags: [],
     locationName: null,
@@ -147,7 +150,7 @@ test.describe("Offline timeline — IDB fallback (Gap A)", () => {
             txn.objectStore("entries").put({
               id: eid, journalId: jid, text,
               createdAt: ts, updatedAt: ts,
-              revisionId: "ef100000-0000-4000-8000-000000000010",
+              revisionId: crypto.randomUUID(),
               starred: false, tags: [],
               locationName: null, locationLat: null, locationLng: null,
               weatherDescription: null, weatherTempCelsius: null, weatherIcon: null,
@@ -235,7 +238,7 @@ test.describe("Offline entry detail — IDB click-flow", () => {
       id: entryId, journalId: DEV_JOURNAL_ID,
       text: entryText,
       createdAt: now, updatedAt: now,
-      revisionId: "ef100000-0000-4000-8000-000000000020",
+      revisionId: crypto.randomUUID(),
       starred: false, tags: [],
       locationName: null, locationLat: null, locationLng: null,
       weatherDescription: null, weatherTempCelsius: null, weatherIcon: null,
@@ -492,7 +495,7 @@ test.describe("Offline → sync (AC4)", () => {
                 id: eid, journalId: jid,
                 text: "Browser offline-sync test entry",
                 createdAt: ts, updatedAt: ts,
-                revisionId: "ef100000-0000-4000-8000-000000000002",
+                revisionId: crypto.randomUUID(),
                 starred: false, tags: [],
                 locationName: null, locationLat: null, locationLng: null,
                 weatherDescription: null, weatherTempCelsius: null, weatherIcon: null,

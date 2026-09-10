@@ -111,9 +111,11 @@ describe("flushMedia()", () => {
     expect(result).toEqual({ uploaded: 1, failed: 0 })
     expect(await stub.idb.listOutboxMedia!()).toHaveLength(0)
     const [url, init] = fetchMock.mock.calls[0]
-    expect(url).toBe(`/api/upload?entryId=${ENTRY_ID}`)
+    expect(url).toBe(`/api/upload?entryId=${ENTRY_ID}&clientMediaId=media-1`)
     expect((init as RequestInit).method).toBe("POST")
-    expect((init as RequestInit).body).toBeInstanceOf(FormData)
+    // Raw body, never multipart: the server streams it to disk as-is.
+    expect((init as RequestInit).body).toBeInstanceOf(Blob)
+    expect(new Headers((init as RequestInit).headers).get("content-type")).toBe("image/jpeg")
   })
 
   it("schickt die Outbox-Id als Idempotenzschlüssel mit", async () => {
@@ -127,9 +129,8 @@ describe("flushMedia()", () => {
 
     await createSyncEngine(stub.idb).flushMedia()
 
-    const [, init] = fetchMock.mock.calls[0]
-    const fd = (init as RequestInit).body as FormData
-    expect(fd.get("clientMediaId")).toBe("media-1")
+    const [url] = fetchMock.mock.calls[0]
+    expect(new URL(url as string, "http://localhost").searchParams.get("clientMediaId")).toBe("media-1")
   })
 
   it("räumt ein Item auf, dessen Eintrag serverseitig gelöscht wurde (410)", async () => {

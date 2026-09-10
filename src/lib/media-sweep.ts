@@ -111,6 +111,13 @@ export async function sweepMediaOrphans(): Promise<{ removedTmp: number; removed
       thumbnail_path: string | null
       preview_path: string | null
     }>(`SELECT file_path, thumbnail_path, preview_path FROM media`)
+    // Fail-safe: leere media-Tabelle, aber Medien-Verzeichnisse vorhanden —
+    // Restore-Fenster (Tabelle existiert, pg_restore ist noch nicht durch).
+    // Jetzt aufräumen hieße alle Medien älter als 24 h löschen.
+    if (rows.length === 0 && volumeDirs.some((d) => UUID_DIR.test(d.name))) {
+      console.warn("[within/media-sweep] media table empty but media dirs present — skipping orphan sweep")
+      return result
+    }
     const referenced = new Set<string>()
     for (const row of rows) {
       for (const p of [row.file_path, row.thumbnail_path, row.preview_path]) {

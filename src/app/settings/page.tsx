@@ -47,6 +47,7 @@ import { apiErrorText, type ApiErrorBody } from "@/lib/i18n/api-errors"
 import {
   BACKUP_STALE_HOURS,
   classifyBackupStatus,
+  classifyDestUsage,
   type BackupStatusLevel,
   type BackupStatusRow,
 } from "@/lib/backup-status"
@@ -68,6 +69,8 @@ import {
   readIdleMinutes,
   writeIdleMinutes,
 } from "@/lib/vault/lock-settings"
+import { RESTORE_CONFIRM_WORD, type DumpInfo, type RestoreState, type RestoreRunRow } from "@/lib/backup-restore"
+import { resetSyncStore } from "@/lib/offline/reset-sync-store"
 import type { Journal } from "@/types/journal"
 
 const JOURNAL_COLORS = [
@@ -150,16 +153,18 @@ function UploadsSection() {
 
 // ── Offline-Vorschauen (E1 24.08.: Zeitraum-Spiegel, meta-Store) ────────────
 
-function formatBytes(bytes: number): string {
+function formatBytes(bytes: number, locale: string): string {
   if (bytes < 1024) return `${bytes} B`
   if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`
-  return `${(bytes / (1024 * 1024)).toFixed(1).replace(/\.0$/, "")} MB`
+  const one = (n: number) => n.toLocaleString(locale, { maximumFractionDigits: 1 })
+  if (bytes < 1024 ** 3) return `${one(bytes / (1024 * 1024))} MB`
+  return `${one(bytes / 1024 ** 3)} GB`
 }
 
 type PreviewStats = { count: number; bytes: number }
 
 function OfflinePreviewsSection() {
-  const { messages } = useI18n()
+  const { messages, locale } = useI18n()
   const m = messages.settings.offlinePreviews
   const [period, setPeriod] = useState<PreviewPeriod>("off")
   // Ergebnis trägt den Zeitraum, für den es gilt — „lädt" ist abgeleitet
@@ -249,7 +254,7 @@ function OfflinePreviewsSection() {
               ? m.loading
               : stats.data === "error"
                 ? m.storageUnavailable
-                : m.storageInfo(stats.data.count, formatBytes(stats.data.bytes))}
+                : m.storageInfo(stats.data.count, formatBytes(stats.data.bytes, locale))}
         </p>
         {period !== "off" && stats?.period === period && stats.data !== "error" && (
           <p className="text-xs text-muted-foreground/70">{m.storageHint}</p>
@@ -401,13 +406,16 @@ function SecuritySection() {
   )
 }
 
-// ── Backup Section (server state, read-only) ─
+// ── Backup Section (server state + the pause switch) ─
 
 function BackupSection() {
   const { messages, locale } = useI18n()
   const m = messages.settings.backup
   const [level, setLevel] = useState<BackupStatusLevel | "loading">("loading")
   const [row, setRow] = useState<BackupStatusRow | null>(null)
+  const [pausedAt, setPausedAt] = useState<string | null>(null)
+  const [toggleFailed, setToggleFailed] = useState(false)
+  const [busy, setBusy] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -417,6 +425,7 @@ function BackupSection() {
         const body = res.ok ? ((await res.json()) as BackupStatusRow) : null
         if (cancelled) return
         setRow(body)
+        setPausedAt(body?.pausedAt ?? null)
         setLevel(classifyBackupStatus(body, res.status, new Date()))
       } catch {
         if (!cancelled) setLevel("unavailable")
@@ -425,9 +434,36 @@ function BackupSection() {
     return () => { cancelled = true }
   }, [])
 
-  const bad = level === "error" || level === "stale"
+  // Optimistic: the switch flips at once and falls back when the server says no.
+  async function handleNightlyToggle(enabled: boolean) {
+    const before = pausedAt
+    setToggleFailed(false)
+    setBusy(true)
+    setPausedAt(enabled ? null : new Date().toISOString())
+    try {
+      const res = await fetch("/api/backup/pause", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ paused: !enabled }),
+      })
+      if (!res.ok) throw new Error(String(res.status))
+      setPausedAt(((await res.json()) as { pausedAt: string | null }).pausedAt)
+    } catch {
+      setPausedAt(before)
+      setToggleFailed(true)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const paused = pausedAt !== null
+  const dest = row?.dest && row.dest.totalBytes > 0 ? row.dest : null
+  const destLevel = dest ? classifyDestUsage(dest) : "ok"
+  // Paused nights are expected to go stale — no red "no longer running" then.
+  const bad = !paused && (level === "error" || level === "stale")
   const statusText =
     level === "ok" ? m.statusOk
+    : paused && level === "stale" ? null
     : level === "stale" ? m.statusStale(BACKUP_STALE_HOURS)
     : level === "error" ? m.statusError
     : level === "none" ? m.statusNone
@@ -435,7 +471,7 @@ function BackupSection() {
     : null
 
   return (
-    <Card>
+    <Card className={cn(paused && "border-yellow-500/60 bg-yellow-50 dark:bg-yellow-950/20")}>
       <CardHeader>
         <CardTitle className="text-base">{m.title}</CardTitle>
         <CardDescription>{m.description}</CardDescription>
@@ -445,16 +481,36 @@ function BackupSection() {
           <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" aria-hidden />
         ) : (
           <>
-            <div className="flex items-center gap-2">
-              {level === "ok" ? (
-                <CheckCircle2 className="h-4 w-4 shrink-0 text-green-600" aria-hidden />
-              ) : bad ? (
-                <XCircle className="h-4 w-4 shrink-0 text-destructive" aria-hidden />
-              ) : (
-                <AlertTriangle className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
-              )}
-              <p className={cn("text-sm", bad && "text-destructive")}>{statusText}</p>
+            <div className="flex items-start justify-between gap-4">
+              <div className="space-y-1">
+                <Label htmlFor="backup-nightly">{m.nightlyToggle}</Label>
+                {paused && (
+                  <p className="text-sm text-yellow-700 dark:text-yellow-400">
+                    {m.pausedSince(new Date(pausedAt).toLocaleString(locale))}
+                  </p>
+                )}
+                {toggleFailed && <p className="text-sm text-destructive">{m.toggleFailed}</p>}
+              </div>
+              <Switch
+                id="backup-nightly"
+                checked={!paused}
+                disabled={busy}
+                onCheckedChange={handleNightlyToggle}
+                aria-label={m.nightlyToggle}
+              />
             </div>
+            {statusText && (
+              <div className="flex items-center gap-2">
+                {level === "ok" ? (
+                  <CheckCircle2 className="h-4 w-4 shrink-0 text-green-600" aria-hidden />
+                ) : bad ? (
+                  <XCircle className="h-4 w-4 shrink-0 text-destructive" aria-hidden />
+                ) : (
+                  <AlertTriangle className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+                )}
+                <p className={cn("text-sm", bad && "text-destructive")}>{statusText}</p>
+              </div>
+            )}
             {row?.run_at && level !== "none" && (
               <p className="text-sm text-muted-foreground">
                 {m.lastRun(new Date(row.run_at).toLocaleString(locale))}
@@ -470,9 +526,356 @@ function BackupSection() {
                   {m.verifiedCounts(row.verify_entry_count, row.verify_media_count)}
                 </p>
               )}
+            {dest && (
+              <p
+                className={cn(
+                  "text-sm",
+                  destLevel === "critical" ? "text-destructive"
+                  : destLevel === "warn" ? "text-yellow-700 dark:text-yellow-400"
+                  : "text-muted-foreground"
+                )}
+              >
+                {m.destUsage(formatBytes(dest.usedBytes, locale), formatBytes(dest.totalBytes, locale), Math.round((dest.usedBytes / dest.totalBytes) * 100))}
+                {destLevel === "warn" && ` — ${m.destWarn}`}
+                {destLevel === "critical" && ` — ${m.destCritical}`}
+              </p>
+            )}
           </>
         )}
       </CardContent>
+    </Card>
+  )
+}
+
+// ── Restore Section (Settings → Backup → Restore) ───────────────────────────
+
+type RestoreGetResponse = RestoreState & { lastRestore: RestoreRunRow | null }
+
+function RestoreSection() {
+  const { messages, locale } = useI18n()
+  const m = messages.settings.backup.restore
+  const [dumpsLoading, setDumpsLoading] = useState(true)
+  const [mounted, setMounted] = useState(false)
+  const [dumps, setDumps] = useState<DumpInfo[]>([])
+  const [live, setLive] = useState({ entries: 0, media: 0 })
+  const [selectedFile, setSelectedFile] = useState<string | null>(null)
+  const [restoreState, setRestoreState] = useState<RestoreState>({ state: "idle" })
+  const [lastRestore, setLastRestore] = useState<RestoreRunRow | null>(null)
+  const [confirmOpen, setConfirmOpen] = useState(false)
+  const [password, setPassword] = useState("")
+  const [confirmWord, setConfirmWord] = useState("")
+  const [dialogError, setDialogError] = useState<string | null>(null)
+  const [submitting, setSubmitting] = useState(false)
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  function stopPolling() {
+    if (pollRef.current) {
+      clearInterval(pollRef.current)
+      pollRef.current = null
+    }
+  }
+
+  async function refetchState() {
+    try {
+      const res = await fetch("/api/backup/restore")
+      if (!res.ok) return
+      const data = (await res.json()) as RestoreGetResponse
+      setLastRestore(data.lastRestore)
+      setRestoreState(data)
+      if (data.state === "done" || data.state === "failed") stopPolling()
+    } catch {
+      // Transient network error while polling — try again on the next tick.
+    }
+  }
+
+  function startPolling() {
+    if (pollRef.current) return
+    pollRef.current = setInterval(() => { void refetchState() }, 3000)
+  }
+
+  async function refetchDumps() {
+    try {
+      const res = await fetch("/api/backup/restore/dumps")
+      if (!res.ok) { setMounted(false); return }
+      const data = (await res.json()) as { mounted: boolean; dumps: DumpInfo[]; live: { entries: number; media: number } }
+      setMounted(data.mounted)
+      setDumps(data.dumps)
+      setLive(data.live)
+    } catch {
+      setMounted(false)
+    }
+  }
+
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      try {
+        const res = await fetch("/api/backup/restore")
+        if (!res.ok || cancelled) return
+        const data = (await res.json()) as RestoreGetResponse
+        setLastRestore(data.lastRestore)
+        if (data.state === "running") {
+          setRestoreState(data)
+          startPolling()
+        }
+      } catch {
+        // No restore in flight is the safe assumption — the picker still works.
+      }
+    })()
+    void refetchDumps().finally(() => { if (!cancelled) setDumpsLoading(false) })
+    return () => {
+      cancelled = true
+      stopPolling()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  const selectedDump = dumps.find((d) => d.file === selectedFile) ?? null
+  const isFresh = live.entries === 0 && live.media === 0
+
+  function openConfirm() {
+    if (!selectedFile) return
+    setPassword("")
+    setConfirmWord("")
+    setDialogError(null)
+    setConfirmOpen(true)
+  }
+
+  async function startRestore() {
+    if (!selectedFile) return
+    setSubmitting(true)
+    setDialogError(null)
+    try {
+      const body: { file: string; password?: string; confirm?: string } = { file: selectedFile }
+      if (!isFresh) {
+        body.password = password
+        body.confirm = confirmWord
+      }
+      const res = await fetch("/api/backup/restore", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      })
+      if (res.status === 202) {
+        const data = (await res.json()) as RestoreState
+        setConfirmOpen(false)
+        setRestoreState(data)
+        startPolling()
+        return
+      }
+      const errBody = await res.json().catch(() => ({})) as ApiErrorBody
+      setDialogError(res.status === 401 ? m.wrongPassword : apiErrorText(messages, errBody, messages.common.unknownError))
+    } catch {
+      setDialogError(messages.common.networkError)
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  function handleCloseFailed() {
+    setRestoreState({ state: "idle" })
+    void refetchDumps()
+    void refetchState()
+  }
+
+  // After a server restore this device's sync cursor points at a generation
+  // that no longer exists — it must re-pull everything, not resume from it.
+  async function handleReload() {
+    await resetSyncStore()
+    window.location.assign("/")
+  }
+
+  const dialogOpen = restoreState.state !== "idle"
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base">{m.title}</CardTitle>
+        <CardDescription>{m.description}</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {dumpsLoading ? (
+          <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" aria-hidden />
+        ) : !mounted ? (
+          <p className="text-sm text-muted-foreground">{m.notMounted}</p>
+        ) : dumps.length === 0 ? (
+          <p className="text-sm text-muted-foreground">{m.noDumps}</p>
+        ) : (
+          <>
+            <div role="radiogroup" aria-label={m.title} className="rounded-lg border divide-y">
+              {dumps.map((d) => (
+                <label
+                  key={d.file}
+                  htmlFor={`restore-dump-${d.file}`}
+                  className="flex items-start gap-3 px-4 py-2.5 text-sm cursor-pointer"
+                >
+                  <input
+                    type="radio"
+                    id={`restore-dump-${d.file}`}
+                    name="restore-dump"
+                    value={d.file}
+                    checked={selectedFile === d.file}
+                    onChange={() => setSelectedFile(d.file)}
+                    className="mt-1"
+                  />
+                  <span className="space-y-0.5">
+                    <span className="block font-medium">{new Date(d.takenAt).toLocaleString(locale)}</span>
+                    <span className="block text-muted-foreground">
+                      {formatBytes(d.sizeBytes, locale)} ·{" "}
+                      {d.entries !== null && d.media !== null ? m.counts(d.entries, d.media) : m.countsUnknown}
+                    </span>
+                  </span>
+                </label>
+              ))}
+            </div>
+            <p className="text-xs text-muted-foreground">{m.mediaNote}</p>
+            <p className="text-xs text-muted-foreground">{m.otherDevicesNote}</p>
+            <Button onClick={openConfirm} disabled={!selectedFile}>
+              {m.button}
+            </Button>
+          </>
+        )}
+
+        {lastRestore && (
+          <div className="text-sm text-muted-foreground border-t pt-3">
+            <p>{m.lastRestore(new Date(lastRestore.run_at).toLocaleString(locale), lastRestore.backup_file ?? "")}</p>
+            {lastRestore.status !== "ok" && (
+              <p className="text-destructive">
+                {m.lastRestoreFailed} {lastRestore.error_msg}
+              </p>
+            )}
+          </div>
+        )}
+      </CardContent>
+
+      {/* Confirmation — fresh install: no data to lose */}
+      {isFresh ? (
+        <AlertDialog open={confirmOpen} onOpenChange={(open) => { if (!open) setConfirmOpen(false) }}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>{m.confirmTitle}</AlertDialogTitle>
+              <AlertDialogDescription>
+                {selectedDump
+                  ? selectedDump.entries !== null && selectedDump.media !== null
+                    ? m.confirmEmpty(new Date(selectedDump.takenAt).toLocaleString(locale), selectedDump.entries, selectedDump.media)
+                    : m.confirmEmptyUnknown(new Date(selectedDump.takenAt).toLocaleString(locale))
+                  : ""}
+              </AlertDialogDescription>
+              {dialogError && <p className="text-sm text-destructive">{dialogError}</p>}
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={submitting}>{messages.common.cancel}</AlertDialogCancel>
+              {/* preventDefault: Radix closes on click — the dialog must stay open to show a POST error */}
+              <AlertDialogAction onClick={(e) => { e.preventDefault(); void startRestore() }} disabled={submitting}>
+                {submitting ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+                {m.confirmAction}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      ) : (
+        <Dialog open={confirmOpen} onOpenChange={(open) => { if (!open) setConfirmOpen(false) }}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>{m.confirmTitle}</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-3">
+              <p className="text-sm text-destructive">{m.confirmOverwrite(live.entries, live.media)}</p>
+              <div className="space-y-1.5">
+                <Label htmlFor="restore-password">{m.passwordLabel}</Label>
+                <Input
+                  id="restore-password"
+                  type="password"
+                  autoComplete="current-password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  disabled={submitting}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="restore-confirm-word">{m.typeWordLabel(RESTORE_CONFIRM_WORD)}</Label>
+                <Input
+                  id="restore-confirm-word"
+                  value={confirmWord}
+                  onChange={(e) => setConfirmWord(e.target.value)}
+                  disabled={submitting}
+                />
+              </div>
+              {dialogError && <p className="text-sm text-destructive">{dialogError}</p>}
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setConfirmOpen(false)} disabled={submitting}>
+                {messages.common.cancel}
+              </Button>
+              <Button
+                onClick={startRestore}
+                disabled={submitting || confirmWord !== RESTORE_CONFIRM_WORD || !password}
+                className="gap-1.5"
+              >
+                {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                {m.confirmAction}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
+
+      {/* Progress — not dismissible while running */}
+      <Dialog
+        open={dialogOpen}
+        onOpenChange={(open) => { if (!open && restoreState.state === "failed") handleCloseFailed() }}
+      >
+        <DialogContent
+          className="[&>button]:hidden"
+          aria-describedby={undefined}
+          onPointerDownOutside={(e) => { if (restoreState.state === "running") e.preventDefault() }}
+          onEscapeKeyDown={(e) => { if (restoreState.state === "running") e.preventDefault() }}
+        >
+          {restoreState.state === "running" && (
+            <>
+              <DialogHeader>
+                <DialogTitle>{m.runningTitle}</DialogTitle>
+              </DialogHeader>
+              <div className="flex items-center gap-3 py-2">
+                <Loader2 className="h-5 w-5 animate-spin text-muted-foreground shrink-0" aria-hidden />
+                <p className="text-sm text-muted-foreground">{m.runningText}</p>
+              </div>
+            </>
+          )}
+          {restoreState.state === "done" && (
+            <>
+              <DialogHeader>
+                <DialogTitle>{m.runningTitle}</DialogTitle>
+              </DialogHeader>
+              <div className="flex items-center gap-3 py-2">
+                <CheckCircle2 className="h-5 w-5 text-green-600 shrink-0" aria-hidden />
+                <p className="text-sm">
+                  {m.doneText(new Date(restoreState.finishedAt).toLocaleString(locale), restoreState.entries, restoreState.media)}
+                </p>
+              </div>
+              <DialogFooter>
+                <Button onClick={handleReload}>{m.reloadButton}</Button>
+              </DialogFooter>
+            </>
+          )}
+          {restoreState.state === "failed" && (
+            <>
+              <DialogHeader>
+                <DialogTitle>{m.failedText}</DialogTitle>
+              </DialogHeader>
+              <div className="flex items-center gap-3 py-2">
+                <XCircle className="h-5 w-5 text-destructive shrink-0" aria-hidden />
+                <p className="text-sm text-destructive">
+                  {restoreState.timedOut ? m.failedTimeout : restoreState.error}
+                </p>
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={handleCloseFailed}>{m.close}</Button>
+              </DialogFooter>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
     </Card>
   )
 }
@@ -1056,6 +1459,7 @@ export default function SettingsPage() {
         <OfflinePreviewsSection />
         <SecuritySection />
         <BackupSection />
+        <RestoreSection />
         <ImportSection journals={journals} />
         <ExportSection journals={journals} />
         <JournalSection journals={journals} onRefresh={loadJournals} />

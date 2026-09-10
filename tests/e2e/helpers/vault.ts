@@ -29,7 +29,15 @@ export async function ensureVaultUnlocked(page: Page, graceMs = 6_000): Promise<
     }
 
     const confirm = page.locator("#vault-pin-confirm")
-    if (await confirm.isVisible().catch(() => false)) {
+    // Nicht `isVisible()` im selben Tick: unter Last war das Setup-Formular schon
+    // sichtbar, das Bestätigungsfeld aber noch nicht — der Helfer füllte dann nur
+    // das erste Feld, klickte den deaktivierten Submit und hing bis zum
+    // Test-Timeout (Nacht 09./10.09.2026, timeline-infinite-scroll 2 von 5 Läufen).
+    const isSetup = await confirm
+      .waitFor({ state: "visible", timeout: 2_000 })
+      .then(() => true)
+      .catch(() => false)
+    if (isSetup) {
       // Setup-Screen (frisches Profil)
       await page.locator("#vault-pin").fill(E2E_PIN)
       await confirm.fill(E2E_PIN)

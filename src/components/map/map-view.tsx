@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from "react"
 import { Globe2, MapPin } from "lucide-react"
-import { Map as MapLibreMap, Marker as MapLibreMarker, setWorkerUrl } from "maplibre-gl"
+import { Map as MapLibreMap, Marker as MapLibreMarker, getVersion, setWorkerUrl } from "maplibre-gl"
 import type { StyleSpecification, GeoJSONSource, FilterSpecification } from "maplibre-gl"
 import type { FeatureCollection } from "geojson"
 import type { Topology, GeometryObject as TopoGeometryObject } from "topojson-specification"
@@ -26,8 +26,9 @@ import citiesJson from "./cities.json"
 
 // The MapLibre web worker must load from a same-origin URL (CSP: worker-src
 // 'self', no blob:). scripts/copy-map-worker.mjs places the worker pair in
-// public/map/ on every build.
-setWorkerUrl("/map/maplibre-gl-worker.mjs")
+// public/map/<version>/ on every build — versioned because the file names are
+// not hashed and the SW keeps /map/ cache-first (#528).
+setWorkerUrl(`/map/${getVersion()}/maplibre-gl-worker.mjs`)
 
 // Bundled TopoJSON (world-atlas, Natural Earth, public domain) — no network
 // request needed (100 % offline). 50m base loads with the map chunk; the 10m

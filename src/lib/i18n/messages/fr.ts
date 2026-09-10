@@ -18,6 +18,7 @@ import { conflictCopiesMessages } from "./sections/conflictCopies"
 import { shareMessages } from "./sections/share"
 import { syncMessages } from "./sections/sync"
 import { errorsMessages } from "./sections/errors"
+import { errorPageMessages } from "./sections/errorPage"
 
 /** Français — tutoiement, cohérent avec le ton de l'app (journal privé). */
 export const fr: Messages = {
@@ -101,6 +102,41 @@ export const fr: Messages = {
       statusNone: "Aucune sauvegarde n'a encore été effectuée. Configuration : docs/backup-restore.md.",
       statusUnavailable: "État de la sauvegarde indisponible.",
       verifiedCounts: (e: number, m: number) => `Vérification de restauration : ${e} entrées · ${m} médias`,
+      nightlyToggle: "Sauvegarde nocturne",
+      pausedSince: (d: string) => `Sauvegarde en pause depuis ${d}`,
+      toggleFailed: "Impossible de basculer — veuillez réessayer.",
+      destUsage: (used: string, total: string, pct: number) => `Espace de sauvegarde : ${used} sur ${total} utilisés (${pct} %)`,
+      destWarn: "L'espace de sauvegarde se remplit.",
+      destCritical: "L'espace de sauvegarde est presque plein.",
+      restore: {
+        title: "Restaurer",
+        description: "Réinjecter une sauvegarde existante dans cette installation — utile si l'application a été réinstallée.",
+        notMounted: "Dossier de sauvegarde non monté — voir x-backup-dir dans docker-compose.yml.",
+        noDumps: "Aucune sauvegarde trouvée.",
+        counts: (e: number, m: number) => `${e} entrées · ${m} médias`,
+        countsUnknown: "Nombre inconnu (sauvegarde antérieure à cette mise à jour)",
+        mediaNote: "Les photos et vidéos sont toujours restaurées à l'état de la dernière sauvegarde, quelle que soit la sauvegarde de base de données choisie.",
+        otherDevicesNote: "Verrouillez ensuite les autres appareils et choisissez « Mot de passe oublié ? » sur l'écran de verrouillage pour réinitialiser leurs données locales — ce n'est qu'ainsi qu'ils chargeront entièrement l'état restauré.",
+        button: "Restaurer la sauvegarde",
+        confirmTitle: "Restaurer cette sauvegarde ?",
+        confirmEmpty: (d: string, e: number, m: number) => `Restaurer la sauvegarde du ${d} avec ${e} entrées et ${m} médias ? Cette installation est vide, rien n'est perdu.`,
+        confirmEmptyUnknown: (d: string) => `Restaurer la sauvegarde du ${d} ? Cette installation est vide, rien n'est perdu.`,
+        confirmOverwrite: (e: number, m: number) => `Attention : ${e} entrées et ${m} médias de cette installation seront remplacés de façon irréversible par la sauvegarde.`,
+        passwordLabel: "Mot de passe",
+        typeWordLabel: (w: string) => `Taper ${w} pour confirmer`,
+        confirmAction: "Restaurer maintenant",
+        wrongPassword: "Mot de passe incorrect.",
+        runningTitle: "Restauration en cours…",
+        runningText: "La base de données et les médias sont restaurés à partir de la sauvegarde. Cela prend généralement moins d'une minute. Merci de laisser cette page ouverte.",
+        doneText: (d: string, e: number | null, m: number | null) =>
+          e === null || m === null ? `Terminé — état du ${d}.` : `Terminé — état du ${d} : ${e} entrées · ${m} médias.`,
+        reloadButton: "Recharger l'application",
+        failedText: "La restauration a échoué.",
+        failedTimeout: "Le service de sauvegarde n'a pas pris en charge la demande. Le conteneur backup tourne-t-il ? Détails : docs/backup-restore.md.",
+        lastRestore: (d: string, f: string) => `Dernière restauration : ${d} depuis ${f}`,
+        lastRestoreFailed: "La dernière restauration a échoué.",
+        close: "Fermer",
+      },
     },
     import: {
       title: "Importer",
@@ -167,4 +203,5 @@ export const fr: Messages = {
   share: shareMessages.fr,
   sync: syncMessages.fr,
   errors: errorsMessages.fr,
+  errorPage: errorPageMessages.fr,
 }

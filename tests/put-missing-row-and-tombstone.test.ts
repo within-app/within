@@ -200,7 +200,9 @@ describe("PUT-404-Härtung + Upsert-Tombstone-Accept", () => {
         // Weit in der Zukunft → Skew-Clamp macht daraus serverNow+5min:
         // strikter LWW-Win bei jedem Durchlauf, jedes Mal eine Konfliktkopie.
         updatedAt: "2030-01-01T00:00:00.000Z",
-        revisionId: "30000000-0000-4000-8000-000000000002",
+        // Pro Edit ein eigenes revisionId wie beim echten Client (buildQueuedEdit) —
+        // ein Retry mit demselben revisionId ist seit PR C ein No-op-Accept.
+        revisionId: `30000000-0000-4000-8000-${String(100 + i).padStart(12, "0")}`,
         starred: false,
         tags: [],
         locationName: null, locationLat: null, locationLng: null,

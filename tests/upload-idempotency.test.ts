@@ -22,10 +22,14 @@ import { NextRequest } from "next/server"
 const mockMkdir = vi.fn().mockResolvedValue(undefined)
 const mockWriteFile = vi.fn().mockResolvedValue(undefined)
 const mockRm = vi.fn().mockResolvedValue(undefined)
-vi.mock("fs/promises", () => ({ mkdir: mockMkdir, writeFile: mockWriteFile, rm: mockRm }))
+const mockRename = vi.fn().mockResolvedValue(undefined)
+vi.mock("fs/promises", () => ({ mkdir: mockMkdir, writeFile: mockWriteFile, rm: mockRm, rename: mockRename }))
 
-const mockSaveFileToDisk = vi.fn().mockResolvedValue(undefined)
-vi.mock("@/lib/upload-stream", () => ({ saveFileToDisk: mockSaveFileToDisk }))
+const mockSaveBodyToDisk = vi.fn().mockResolvedValue(0)
+vi.mock("@/lib/upload-stream", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/upload-stream")>()),
+  saveBodyToDisk: mockSaveBodyToDisk,
+}))
 
 vi.mock("@/lib/video-thumbnail", () => ({
   extractPoster: vi.fn().mockResolvedValue(null),
@@ -35,6 +39,8 @@ vi.mock("@/lib/video-thumbnail", () => ({
 }))
 
 const mockDbQuery = vi.fn()
+// Session + rate limit are proven in tests/api-guard-bypass-proxy.test.ts.
+vi.mock("@/lib/request-guard", () => ({ guardApiRequest: async () => null }))
 vi.mock("@/lib/db", () => ({ db: { query: mockDbQuery } }))
 
 vi.mock("@/lib/logger", () => ({ logError: vi.fn(), logWarn: vi.fn() }))
@@ -49,27 +55,19 @@ const ENTRY_ID = "20000000-0000-4000-8000-000000000001"
 const CLIENT_MEDIA_ID = "50000000-0000-4000-8000-000000000001"
 const EXISTING_MEDIA_ID = "40000000-0000-4000-8000-000000000001"
 
+// Raw body: clientMediaId travels as query parameter, MIME type and size as
+// content-type / content-length headers.
 function makeUploadReq(opts: { entryId?: string; clientMediaId?: string } = {}) {
-  const url = `http://localhost/api/upload${opts.entryId ? `?entryId=${opts.entryId}` : ""}`
-  const req = new NextRequest(url, { method: "POST" })
-
-  const mockFile = {
-    type: "audio/mpeg",
-    size: 512 * 1024,
-    name: "synthetic-audio",
-    stream: () => new ReadableStream<Uint8Array>(),
-    arrayBuffer: async () => new ArrayBuffer(0),
-  }
-
-  vi.spyOn(req, "formData").mockResolvedValue({
-    get: (key: string) => {
-      if (key === "file") return mockFile
-      if (key === "clientMediaId") return opts.clientMediaId ?? null
-      return null
-    },
-  } as unknown as FormData)
-
-  return req
+  const params = new URLSearchParams()
+  if (opts.entryId) params.set("entryId", opts.entryId)
+  if (opts.clientMediaId) params.set("clientMediaId", opts.clientMediaId)
+  const url = `http://localhost/api/upload${params.size ? `?${params}` : ""}`
+  return new NextRequest(url, {
+    method: "POST",
+    headers: { "content-type": "audio/mpeg", "content-length": String(512 * 1024) },
+    body: new ReadableStream<Uint8Array>({ start(c) { c.enqueue(new Uint8Array(1)); c.close() } }),
+    duplex: "half",
+  } as ConstructorParameters<typeof NextRequest>[1])
 }
 
 /**
@@ -146,7 +144,7 @@ describe("upload route — Idempotenzschlüssel", () => {
     expect(body.filePath).toBe("/media/synth/existing.mp3")
     expect(insertCalls()).toHaveLength(0)
     expect(mockMkdir).not.toHaveBeenCalled()
-    expect(mockSaveFileToDisk).not.toHaveBeenCalled()
+    expect(mockSaveBodyToDisk).not.toHaveBeenCalled()
   })
 
   it("Erst-Upload schreibt clientMediaId als INSERT-Parameter mit", async () => {
@@ -203,6 +201,19 @@ describe("upload route — Idempotenzschlüssel", () => {
     expect(body.filePath).toBe("/media/synth/winner.mp3")
     expect(mockRm).toHaveBeenCalledOnce()
   })
+
+  it("transitional: ein Multipart-Client (vor #530) schickt clientMediaId als Formularfeld — wird weiter gelesen", async () => {
+    seedDb()
+    const fd = new FormData()
+    fd.append("file", new File([new Uint8Array(1024)], "synthetic.mp3", { type: "audio/mpeg" }))
+    fd.append("clientMediaId", CLIENT_MEDIA_ID)
+
+    const res = await POST(new NextRequest(`http://localhost/api/upload?entryId=${ENTRY_ID}`, { method: "POST", body: fd }))
+
+    expect(res.status).toBe(201)
+    const [insert] = insertCalls()
+    expect(insert[1] as unknown[]).toContain(CLIENT_MEDIA_ID)
+  })
 })
 
 // ── Keine Waisen-Dateien ───────────────────────────────────────────────
@@ -217,7 +228,7 @@ describe("upload route — Existenz-Check vor Platten-Schreiben", () => {
     const body = await res.json() as { code: string }
     expect(body.code).toBe("entry_missing")
     expect(mockMkdir).not.toHaveBeenCalled()
-    expect(mockSaveFileToDisk).not.toHaveBeenCalled()
+    expect(mockSaveBodyToDisk).not.toHaveBeenCalled()
     expect(insertCalls()).toHaveLength(0)
   })
 
@@ -230,7 +241,7 @@ describe("upload route — Existenz-Check vor Platten-Schreiben", () => {
     const body = await res.json() as { code: string }
     expect(body.code).toBe("entry_deleted")
     expect(mockMkdir).not.toHaveBeenCalled()
-    expect(mockSaveFileToDisk).not.toHaveBeenCalled()
+    expect(mockSaveBodyToDisk).not.toHaveBeenCalled()
   })
 
   it("FK-Fehler beim INSERT (Eintrag im Fenster verschwunden) → Dateien werden entfernt, 503 retryable", async () => {
@@ -255,7 +266,7 @@ describe("upload route — Existenz-Check vor Platten-Schreiben", () => {
     expect(res.status).toBe(503)
     const body = await res.json() as { code: string }
     expect(body.code).toBe("media_insert_failed")
-    expect(mockSaveFileToDisk).toHaveBeenCalledOnce()
+    expect(mockSaveBodyToDisk).toHaveBeenCalledOnce()
     expect(mockRm).toHaveBeenCalledOnce()
   })
 })

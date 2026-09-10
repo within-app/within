@@ -256,6 +256,14 @@ export function createSyncEngine(
       })
 
       if (!result.ok || !result.data) {
+        // Only 400/422 mean batch-poison (one bad entry) — worth retrying
+        // per entry. Anything else (0 network, 401/403 session, 429 rate
+        // limit, 5xx Pi overloaded) fails per entry just the same: keep the
+        // rest queued for the next trigger instead of firing N more requests.
+        if (result.status !== 400 && result.status !== 422) {
+          for (const entry of entries) handleRejectedEntry(entry, result.status, allErrors)
+          break
+        }
         // Batch rejected — fall back per-entry to prevent one bad entry from
         // blocking all others (batch-poison). Fallback path preserved:
         // entries remain queued for retry; only permanently-rejected ones are reported.
@@ -453,21 +461,21 @@ export function createSyncEngine(
         uploadBlob = prepared.blob
         if (uploadBlob !== item.blob) uploadMime = uploadBlob.type || item.mimeType
       }
-      const fd = new FormData()
-      fd.append("file", new File([uploadBlob], item.fileName, { type: uploadMime }))
       // The outbox id doubles as idempotency key — a retry after a lost
       // response finds the already-inserted row instead of duplicating it.
-      fd.append("clientMediaId", item.id)
+      const params = new URLSearchParams({ entryId: item.entryId, clientMediaId: item.id })
 
       let ok = false
       let status = 0
       let body: { id?: string } | null = null
       let message = texts.networkError
       try {
-        const res = await fetch(
-          `${baseUrl}/api/upload?entryId=${encodeURIComponent(item.entryId)}`,
-          { method: "POST", body: fd }
-        )
+        // Raw body, no multipart: the server streams it straight to disk.
+        const res = await fetch(`${baseUrl}/api/upload?${params}`, {
+          method: "POST",
+          headers: { "content-type": uploadMime },
+          body: uploadBlob,
+        })
         ok = res.ok
         status = res.status
         body = await res.json().catch(() => null)

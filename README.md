@@ -131,6 +131,7 @@ Within reads Day One's export. In Day One choose *Export → JSON*, which gives 
 - **Expected format:** a ZIP with one or more `.json` files at the top level and media in `photos/`, `videos/` and `audios/` folders.
 - **What comes across:** text, creation and modification dates, tags, favourites, location and weather data, the original entry ID, and all photos, videos and audio.
 - **What does not:** PDF attachments. Day One can attach them, Within does not import them — keep those files separately.
+- **Photos are checked like uploads:** the import only takes JPEG, PNG, WebP and GIF — Within looks at the file itself, not its name. Anything else (HEIC/AVIF, TIFF, …) is skipped and listed under the import result so you can convert and add those pictures by hand. On a Mac: select the HEIC files in Finder → right-click → *Quick Actions* → *Convert Image* → JPEG.
 
 Large journals are imported in batches; the page shows progress and you can keep the tab open in the background.
 
@@ -148,13 +149,13 @@ Large journals are imported in batches; the page shows progress and you can keep
 
 The `backup` service in the compose file runs every night at 02:00 (your time zone): it dumps the database, mirrors your media folder and then **restores the dump into a scratch database to prove it can be read**. The result shows up under *Settings → Backup* in the app — green when the last run was fine, red when it failed or is older than a day.
 
-By default backups go to `./backups` next to your compose file. **A copy on the same disk protects you from mistakes, not from a dead disk or a fire.** Plug in an external drive, mount it, and change this line in the `backup` service:
+By default backups go to `./backups` next to your compose file. **A copy on the same disk protects you from mistakes, not from a dead disk or a fire.** Plug in an external drive, mount it, and change the `source` line of `x-backup-dir` at the top of the compose file (one place — the backup service writes there, the app reads the list of backups there):
 
 ```yaml
-      - ./backups:/backup        →      - /mnt/my-external-drive/within:/backup
+  source: ./backups        →        source: /mnt/my-external-drive/within
 ```
 
-Restoring, running a backup by hand, and how the retention works (7 daily + 4 weekly copies) are described in [docs/backup-restore.md](docs/backup-restore.md).
+**Restoring** happens in the app: after a fresh setup with the same backup drive attached, *Settings → Backup* lists your backups and puts them back with one click (password and a typed confirmation when the installation is not empty). Restoring by hand, running a backup manually, and how the retention works (7 daily + 4 weekly copies) are described in [docs/backup-restore.md](docs/backup-restore.md).
 
 ## Updating, and going back
 
@@ -181,6 +182,7 @@ Within is deliberately reachable only in your home network. If you want to write
 | `app` restarts in a loop, `docker compose logs app` shows *Kein Login-Passwort konfiguriert* | `APP_PASSWORD` is empty on the very first start. | Put a password in `APP_PASSWORD`, `docker compose up -d`. After the first start the line may be empty. |
 | Containers get killed or the Pi freezes | Not enough memory. | Within reserves about 2.3 GB; use a machine with 4 GB or more, and no other heavy services next to it. |
 | Login says *too many attempts* | Five wrong passwords within a minute from one device. | Wait a minute. |
+| `app` shows *unhealthy*, `/api/health` answers `503 {"status":"db_down"}` | The app cannot reach the database (still starting, or a restore is running). | `docker compose logs db`; during a restore this is expected until it finishes. |
 | *Settings → Backup* is red | The backup folder is not mounted (external drive unplugged?) or the last run is older than a day. | `docker compose logs backup`; check the drive; run `docker compose exec backup bash scripts/backup/backup-full.sh` by hand. |
 
 Logs: `docker compose logs app`, `docker compose logs caddy`, `docker compose logs backup`.

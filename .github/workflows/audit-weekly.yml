@@ -1,0 +1,74 @@
+name: Weekly npm audit
+
+# Jan, 2026-09-09: npm audit no longer blocks a merge unless the PR changes the
+# dependency list (tests.yml). New advisories in unchanged dependencies are
+# caught here once a week and reported as a GitHub issue labelled `npm-audit`
+# (one open issue at a time; later findings land as comments on it).
+on:
+  schedule:
+    - cron: "0 6 * * 1" # Mondays 06:00 UTC
+  workflow_dispatch:
+
+jobs:
+  audit:
+    name: npm audit (high, production deps)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      issues: write
+    env:
+      NPM_CONFIG_FETCH_RETRIES: "5"
+      NPM_CONFIG_FETCH_RETRY_MAXTIMEOUT: "60000"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Node 20 is EOL (2026-04-30); testcontainers 12 and undici 8 need Node >= 22.
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --prefer-offline
+
+      - name: Audit dependencies (npm audit)
+        id: audit
+        run: |
+          set +e
+          timeout 300 npm audit --audit-level=high --omit=dev 2>&1 | tee audit.txt
+          RC=${PIPESTATUS[0]}
+          set -e
+          echo "rc=${RC}" >> "$GITHUB_OUTPUT"
+          if [ "$RC" -eq 0 ]; then exit 0; fi
+          # Registry/tooling failure: red run (GitHub mails the owner), no issue.
+          if [ "$RC" -eq 124 ] || grep -qE '^npm (ERR!|error)' audit.txt; then
+            echo "::error::npm audit could not reach the registry (exit ${RC}) — nothing checked this week."
+            echo "registry_error=true" >> "$GITHUB_OUTPUT"
+            exit 1
+          fi
+          echo "advisories=true" >> "$GITHUB_OUTPUT"
+
+      - name: File or update the npm-audit issue
+        if: steps.audit.outputs.advisories == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh label create npm-audit --color D93F0B \
+            --description "Open high-severity npm advisory found by audit-weekly.yml" 2>/dev/null || true
+          BODY=$(printf '`npm audit --audit-level=high --omit=dev` on `%s` (`%s`, run %s) exited %s:\n\n```\n%s\n```\n' \
+            "$GITHUB_REF_NAME" "$GITHUB_SHA" "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+            "${{ steps.audit.outputs.rc }}" "$(head -c 60000 audit.txt)")
+          EXISTING=$(gh issue list --label npm-audit --state open --json number --jq '.[0].number // ""')
+          if [ -n "$EXISTING" ]; then
+            gh issue comment "$EXISTING" --body "$BODY"
+            echo "Updated open issue #${EXISTING}"
+          else
+            gh issue create --title "npm audit: high-severity advisory in production dependencies" \
+              --label npm-audit --body "$BODY"
+          fi
+          exit 1 # keep the run red so it is visible in the Actions list

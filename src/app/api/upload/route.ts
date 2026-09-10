@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
-import { writeFile, mkdir, rm } from "fs/promises"
+import { mkdir, rm, rename } from "fs/promises"
 import { join } from "path"
 import { logError, logWarn } from "@/lib/logger"
 import {
@@ -10,7 +10,8 @@ import {
   getMaxMBForType,
 } from "@/lib/upload-security"
 import { extractPoster, generateLoopClip, probeDuration, probeMediaStreams } from "@/lib/video-thumbnail"
-import { saveFileToDisk } from "@/lib/upload-stream"
+import { saveBodyToDisk, UploadTooLargeError } from "@/lib/upload-stream"
+import { guardApiRequest } from "@/lib/request-guard"
 import type { Pool } from "pg"
 
 /**
@@ -114,22 +115,56 @@ async function attachOrFail(
   }
 }
 
+function tooLarge(mediaType: "photo" | "video" | "audio"): NextResponse {
+  const maxMB = getMaxMBForType(mediaType)
+  const label = mediaType === "video" ? "Videos" : mediaType === "audio" ? "Audio" : "Bilder"
+  return NextResponse.json(
+    { error: `Datei zu groß (max. ${maxMB} MB für ${label})`, code: "file_too_large", maxMB, kind: mediaType },
+    { status: 400 }
+  )
+}
+
+/**
+ * Raw-body upload: the file IS the body, its MIME type is the content-type,
+ * its size the content-length; entryId and clientMediaId travel as query
+ * parameters. Multipart buffered the whole body in RAM before anything could
+ * stream (60 MB file → +125 MB RSS on the Pi). The route sits outside the
+ * proxy matcher (Next would clone the body into RAM there) and guards itself.
+ */
 export async function POST(req: NextRequest) {
+  const guard = await guardApiRequest(req)
+  if (guard) return guard
+
   const entryId = req.nextUrl.searchParams.get("entryId")
 
-  let formData: FormData
-  try {
-    formData = await req.formData()
-  } catch {
-    return NextResponse.json({ error: "Ungültiger Request", code: "invalid_request" }, { status: 400 })
+  let body: ReadableStream<Uint8Array> | null
+  let contentType = (req.headers.get("content-type") ?? "").split(";")[0].trim()
+  let contentLength: string
+  let clientMediaIdRaw: FormDataEntryValue | null
+  if (contentType.startsWith("multipart/")) {
+    // intentionally transitional: multipart path for pre-#530 clients (their
+    // cached JS still sends FormData; buffers like before). Remove after 2026-10-15.
+    let formData: FormData
+    try {
+      formData = await req.formData()
+    } catch {
+      return NextResponse.json({ error: "Ungültiger Request", code: "invalid_request" }, { status: 400 })
+    }
+    const file = formData.get("file")
+    if (!file || typeof file === "string") {
+      return NextResponse.json({ error: "Keine Datei übermittelt", code: "no_file" }, { status: 400 })
+    }
+    body = file.stream()
+    contentType = file.type
+    contentLength = String(file.size)
+    clientMediaIdRaw = formData.get("clientMediaId")
+  } else {
+    body = req.body
+    contentLength = req.headers.get("content-length") ?? ""
+    clientMediaIdRaw = req.nextUrl.searchParams.get("clientMediaId")
   }
 
-  const file = formData.get("file") as File | null
-  if (!file) {
-    return NextResponse.json({ error: "Keine Datei übermittelt", code: "no_file" }, { status: 400 })
-  }
-
-  const mediaType = detectMediaTypeFromMime(file.type)
+  const mediaType = detectMediaTypeFromMime(contentType)
   if (!mediaType) {
     return NextResponse.json(
       { error: "Dateiformat nicht erlaubt (MP4, MOV, MP3, M4A, AAC, JPG, PNG, WebP, GIF)", code: "file_type_not_allowed" },
@@ -137,17 +172,14 @@ export async function POST(req: NextRequest) {
     )
   }
 
-  const maxBytes = getMaxBytesForType(mediaType)
-  if (file.size > maxBytes) {
-    const maxMB = getMaxMBForType(mediaType)
-    const label = mediaType === "video" ? "Videos" : mediaType === "audio" ? "Audio" : "Bilder"
-    return NextResponse.json(
-      { error: `Datei zu groß (max. ${maxMB} MB für ${label})`, code: "file_too_large", maxMB, kind: mediaType },
-      { status: 400 }
-    )
+  // Size gate BEFORE any byte is read; a byte counter in saveBodyToDisk backs it up.
+  if (!/^\d+$/.test(contentLength) || !body) {
+    return NextResponse.json({ error: "Ungültiger Request", code: "length_required" }, { status: 411 })
   }
+  const maxBytes = getMaxBytesForType(mediaType)
+  if (Number(contentLength) > maxBytes) return tooLarge(mediaType)
 
-  const clientMediaId = parseClientMediaId(formData.get("clientMediaId"))
+  const clientMediaId = parseClientMediaId(clientMediaIdRaw)
 
   // Settle idempotency and entry existence BEFORE bytes hit the
   // disk. Best-effort — a DB hiccup here falls through to today's behavior
@@ -203,14 +235,21 @@ export async function POST(req: NextRequest) {
   const dir = join(process.cwd(), "public", "media", uuid)
   await mkdir(dir, { recursive: true })
 
-  // ── Photo path (unchanged — sharp is the sole content validator) ──────────
+  // ── Photo path (sharp is the sole content validator, reads from disk) ─────
   if (mediaType === "photo") {
-    // Buffer only for photo: sharp needs the full bytes for validation + resize
-    const buffer = Buffer.from(await file.arrayBuffer())
+    // Extension is only known after sharp has looked at the bytes → temp name first.
+    const tmpPath = join(dir, `${uuid}-original`)
+    try {
+      await saveBodyToDisk(body, tmpPath, maxBytes)
+    } catch (err) {
+      await removeUploadDir(dir)
+      if (err instanceof UploadTooLargeError) return tooLarge(mediaType)
+      throw err
+    }
     let ext: string
     try {
       const sharpValidate = (await import("sharp")).default
-      const metadata = await sharpValidate(buffer).metadata()
+      const metadata = await sharpValidate(tmpPath).metadata()
       const safeExt = safeExtFromFormat(metadata.format)
       if (!safeExt) {
         await removeUploadDir(dir) // sonst bleibt pro abgelehntem Upload ein leeres Verzeichnis zurück
@@ -226,14 +265,15 @@ export async function POST(req: NextRequest) {
     }
 
     const originalName = `${uuid}-original.${ext}`
-    await writeFile(join(dir, originalName), buffer)
+    const originalFsPath = join(dir, originalName)
+    await rename(tmpPath, originalFsPath)
     const filePath = `/media/${uuid}/${originalName}`
 
     const thumbName = `${uuid}-thumb.webp`
     let thumbPath = filePath
     try {
       const sharp = (await import("sharp")).default
-      await sharp(buffer)
+      await sharp(originalFsPath)
         .rotate()
         .resize({ width: 400, withoutEnlargement: true })
         .webp({ quality: 80 })
@@ -256,10 +296,16 @@ export async function POST(req: NextRequest) {
   // ── Video / Audio path ───────────────────────────────────────────────────
   // Extension derived from the explicit MIME allowlist (content validated by ffprobe below)
   // Stream directly to disk — never buffer 100 MB video into heap
-  const ext = safeExtFromMime(file.type)!
+  const ext = safeExtFromMime(contentType)!
   const originalName = `${uuid}-original.${ext}`
   const originalFsPath = join(dir, originalName)
-  await saveFileToDisk(file, originalFsPath)
+  try {
+    await saveBodyToDisk(body, originalFsPath, maxBytes)
+  } catch (err) {
+    await removeUploadDir(dir)
+    if (err instanceof UploadTooLargeError) return tooLarge(mediaType)
+    throw err
+  }
   const filePath = `/media/${uuid}/${originalName}`
 
   // Content-Validierung analog zum sharp-Gate beim Foto-Pfad: der MIME-Header

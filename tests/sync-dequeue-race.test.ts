@@ -292,8 +292,9 @@ describe("Push-Dequeue-Race (B02)", () => {
       if (url.includes("/api/settings")) return jsonResponse(200, {})
       if (url.includes("/api/sync/upsert")) {
         const sent = (JSON.parse(String(init?.body)) as { entries: SyncEntry[] }).entries
-        // Batch mit beiden → 500 (Batch-Poison), danach einzeln.
-        if (sent.length === 2) return jsonResponse(500, { error: "boom" })
+        // Batch mit beiden → 400 (Batch-Poison: ein Eintrag fällt durch die
+        // Validierung), danach einzeln. 5xx fächert seit PR C nicht mehr auf.
+        if (sent.length === 2) return jsonResponse(400, { error: "invalid" })
         if (sent[0].id === "e1") {
           await idb.enqueueEdit(v2)
           return jsonResponse(400, { error: "invalid" })

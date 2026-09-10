@@ -261,3 +261,48 @@ DELETE FROM entry_tags et
  USING entries e
  WHERE et.entry_id = e.id
    AND e.deleted_at IS NOT NULL;
+
+-- ============================================================
+-- 20260909_000000 — backup_runs.kind: Wiederherstellungen im selben Protokoll
+-- ============================================================
+-- Der Restore-Knopf (Einstellungen → Backup) schreibt pro Wiederherstellung
+-- eine Zeile in backup_runs, unterschieden über kind = 'restore' statt einer
+-- zweiten, fast identischen Tabelle. Bestand bleibt 'backup' (Default).
+-- Additiv und idempotent; scripts/backup/restore.sh legt die Spalte nach dem
+-- Einspielen eines älteren Dumps ebenfalls an (ADD COLUMN IF NOT EXISTS).
+
+DO $$ BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'backup_runs' AND column_name = 'kind'
+  ) THEN
+    ALTER TABLE backup_runs ADD COLUMN kind TEXT NOT NULL DEFAULT 'backup';
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'backup_runs_kind_check'
+  ) THEN
+    ALTER TABLE backup_runs
+      ADD CONSTRAINT backup_runs_kind_check CHECK (kind IN ('backup', 'restore'));
+  END IF;
+END $$;
+
+-- ============================================================
+-- 20260909_220000 — backup_runs.status 'skipped': pausierte Nächte
+-- ============================================================
+-- Der Schalter „Nächtliche Sicherung" (Einstellungen → Backup) setzt
+-- app_settings.backup_paused_at; scripts/backup/loop.sh überspringt dann die
+-- Kette und schreibt eine 'skipped'-Zeile ins Protokoll. Die CHECK-Constraint
+-- aus dem CREATE TABLE trägt den automatischen Namen backup_runs_status_check;
+-- sie wird nur ersetzt, wenn sie 'skipped' noch nicht kennt. Additiv, idempotent.
+
+DO $$ BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'backup_runs_status_check'
+      AND pg_get_constraintdef(oid) LIKE '%skipped%'
+  ) THEN
+    ALTER TABLE backup_runs DROP CONSTRAINT IF EXISTS backup_runs_status_check;
+    ALTER TABLE backup_runs
+      ADD CONSTRAINT backup_runs_status_check CHECK (status IN ('ok', 'error', 'skipped'));
+  END IF;
+END $$;

@@ -113,6 +113,8 @@ export type UploadVerdict = "attached" | "retry" | "rejected" | "orphaned"
  * entry cannot take a media row — 409 (not pushed yet) keeps the retry
  * semantics of 201-without-id, 410 (entry deleted) means the file has no home
  * anymore and the outbox item should be dropped, not shown as stuck forever.
+ * 429 is the API rate limit (60/min): a batch of holiday photos must wait for
+ * the next window, never be given up on.
  */
 export function classifyUploadResponse(res: {
   ok: boolean
@@ -122,7 +124,7 @@ export function classifyUploadResponse(res: {
   if (!res.ok) {
     // status 0 = fetch threw (offline again); 5xx = server hiccup — both retryable.
     if (res.status === 0 || res.status >= 500) return "retry"
-    if (res.status === 409) return "retry"
+    if (res.status === 409 || res.status === 429) return "retry"
     if (res.status === 410) return "orphaned"
     return "rejected"
   }

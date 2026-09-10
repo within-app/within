@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server"
 import { db } from "@/lib/db"
+import { readPausedAt } from "@/lib/db/backup-restore"
+import { destUsage } from "@/lib/backup-restore-files"
 
 export const dynamic = "force-dynamic"
 
@@ -15,15 +17,16 @@ export async function GET() {
               live_media_count, verify_media_count,
               error_msg
        FROM backup_runs
+       WHERE kind = 'backup' AND status <> 'skipped'
        ORDER BY run_at DESC
        LIMIT 1`
     )
+    // Paused nights are 'skipped' rows: the card shows the last real run plus
+    // the pause state — never a skipped row as "the last backup".
+    const pausedAt = await readPausedAt(db)
+    const dest = await destUsage()
 
-    if (rows.length === 0) {
-      return NextResponse.json({ status: "no_runs_yet" })
-    }
-
-    return NextResponse.json(rows[0])
+    return NextResponse.json({ ...(rows[0] ?? { status: "no_runs_yet" }), pausedAt, dest })
   } catch {
     return NextResponse.json({ error: "Database unavailable" }, { status: 503 })
   }

@@ -23,9 +23,9 @@ export async function register() {
       if (await ensureDefaultJournal()) console.log("[journals] Standard-Journal angelegt")
     } catch (err) {
       if (process.env.NODE_ENV === "production") {
-        // Fail loudly: rethrow so Next.js startup crashes and the Docker
-        // healthcheck triggers a restart (never serve anything but an
-        // honest 503 without the database).
+        // Fail loudly: rethrow so the Next.js process exits and Docker's
+        // `restart: unless-stopped` starts it again (never serve anything
+        // but an honest 503 without the database).
         console.error("[db] Fatal: migration failed in production — aborting startup.", err)
         throw err
       }
@@ -33,30 +33,19 @@ export async function register() {
       console.warn("[db] Could not connect to database. Data routes answer 503 until it is reachable.", err)
     }
 
-    // Medien-Waisen + Import-Temp-Leichen aufräumen — beim Start und
-    // danach täglich. Best effort, blockiert den Start nicht (kein await auf
-    // den Intervall-Lauf; sweepMediaOrphans fängt intern alles).
+    // Aufräumen: Medien-Waisen + Import-Temp-Leichen, danach Waisen-Tags
+    // (der Schreibpfad räumt nach jedem COMMIT best effort, der Sweep holt
+    // nach). 60 s nach dem Start — nicht parallel zum ersten Request — und
+    // danach täglich, als Kette statt Fan-out. Nie awaited: beide Sweeps
+    // fangen intern alles, nichts hängt vom Ergebnis ab.
     try {
       const { sweepMediaOrphans } = await import("./lib/media-sweep")
-      await sweepMediaOrphans()
-      setInterval(() => {
-        void sweepMediaOrphans()
-      }, 24 * 60 * 60 * 1000).unref?.()
-    } catch (err) {
-      console.warn("[within/media-sweep] setup failed:", err)
-    }
-
-    // Waisen-Tags: der Schreibpfad räumt nach jedem COMMIT best
-    // effort; dieser Sweep holt nach — beim Start und täglich, nie blockierend
-    // (sweepOrphanTags fängt intern alles).
-    try {
       const { sweepOrphanTags } = await import("./lib/db/tags")
-      await sweepOrphanTags()
-      setInterval(() => {
-        void sweepOrphanTags()
-      }, 24 * 60 * 60 * 1000).unref?.()
+      const sweep = () => void sweepMediaOrphans().then(() => sweepOrphanTags())
+      setTimeout(sweep, 60_000).unref?.()
+      setInterval(sweep, 24 * 60 * 60 * 1000).unref?.()
     } catch (err) {
-      console.warn("[within/tag-sweep] setup failed:", err)
+      console.warn("[within/sweep] setup failed:", err)
     }
   }
 

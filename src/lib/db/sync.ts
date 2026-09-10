@@ -214,7 +214,9 @@ export async function upsertEntries(entries: SyncEntry[]): Promise<UpsertResult>
          FROM entries e WHERE e.id = $1
          FOR UPDATE OF e`
 
-    for (const entry of entries) {
+    // Feste Sperrreihenfolge (nach id): zwei Geräte, die dieselben Einträge
+    // in anderer Reihenfolge schicken, warten sonst gegenseitig → Deadlock.
+    for (const entry of [...entries].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))) {
       let existing = (await client.query<ExistingEntryRow>(selectEntrySql, [entry.id])).rows
 
       if (existing.length === 0) {
@@ -263,6 +265,13 @@ export async function upsertEntries(entries: SyncEntry[]): Promise<UpsertResult>
       }
 
       const server = existing[0]
+      // Same revision = this exact edit already landed (response lost, client
+      // retried). Re-accept without touching the row — otherwise the retry
+      // would lose LWW against its own serverNow stamp and become a conflict.
+      if (server.revision_id === entry.revisionId) {
+        accepted.push(entry.id)
+        continue
+      }
       const serverUpdatedAt = new Date(server.updated_at)
       // Clamp client-supplied timestamp to serverNow + MAX_CLOCK_SKEW_MS so a device with a
       // fast-running clock cannot win LWW battles it should lose.
@@ -271,14 +280,14 @@ export async function upsertEntries(entries: SyncEntry[]): Promise<UpsertResult>
       const effectiveClientUpdatedAt = rawClientUpdatedAt <= skewCeiling ? rawClientUpdatedAt : skewCeiling
 
       if (effectiveClientUpdatedAt >= serverUpdatedAt) {
-        // On an exact tie: the client's timestamp matches the server's, which happens
-        // when a response is lost and the client retries with the same updatedAt. Saving a conflict
-        // copy would pollute sync_conflict_copies with a spurious row. Only save on strict win.
+        // Only snapshot the server version on a strict win — an exact tie
+        // carries nothing worth keeping.
         if (effectiveClientUpdatedAt > serverUpdatedAt) {
           await _saveConflictCopy(client, entry.id, server)
         }
 
-        const newRevisionId = crypto.randomUUID()
+        // Store the client's revisionId (unique per queued edit) so a retry of
+        // this edit is recognised above; the online PUT path keeps minting its own.
         await client.query(
           `UPDATE entries SET
              journal_id = $2, text = $3, created_at = $4, updated_at = $5,
@@ -288,7 +297,7 @@ export async function upsertEntries(entries: SyncEntry[]): Promise<UpsertResult>
            WHERE id = $1`,
           [
             entry.id, entry.journalId, entry.text ?? "",
-            entry.createdAt, serverNow, newRevisionId,
+            entry.createdAt, serverNow, entry.revisionId,
             entry.starred ?? false,
             entry.locationName ?? null, entry.locationLat ?? null, entry.locationLng ?? null,
             entry.weatherDescription ?? null, entry.weatherTempCelsius ?? null, entry.weatherIcon ?? null,
@@ -340,7 +349,8 @@ export async function upsertEntries(entries: SyncEntry[]): Promise<UpsertResult>
     await client.query("COMMIT")
     await deleteOrphanTags(client, removedTagIds)
   } catch (err) {
-    await client.query("ROLLBACK")
+    // Tote Verbindung: das ROLLBACK darf den echten Fehler nicht überdecken.
+    await client.query("ROLLBACK").catch(() => {})
     throw err
   } finally {
     client.release()

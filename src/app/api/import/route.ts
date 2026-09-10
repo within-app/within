@@ -4,6 +4,8 @@ import { join } from "path"
 import { cleanText } from "@/lib/clean-text"
 import { streamUnzipToDisk, ImportZipError } from "@/lib/import-stream"
 import { mapWeatherCode, toUUID, buildLocationName } from "@/lib/dayone-import"
+import { guardApiRequest } from "@/lib/request-guard"
+import { safeExtFromFormat } from "@/lib/upload-security"
 
 export const maxDuration = 120 // allow up to 2 minutes for large imports
 // Pi-safe ceiling: DayOne real exports are ~28 MB; 100 MiB (104,857,600 bytes) gives
@@ -34,8 +36,23 @@ async function moveFile(src: string, dest: string): Promise<void> {
  * Moves an unpacked photo into its own media dir and writes the 400px webp
  * thumbnail (thumbPath falls back to the original when sharp fails). Returns
  * the web paths for the media row and every file written (cleanup on rollback).
+ *
+ * Same trust boundary as the upload (upload/route.ts): sharp reads only the
+ * header, the format must be on the allowlist, and the extension comes from
+ * that format — never from the filename in the ZIP. Returns null when the file
+ * is not JPEG/PNG/WebP/GIF, before any decode happens (AVIF/HEIC would
+ * otherwise go through libheif).
  */
-async function importPhoto(tempPath: string, ext: string): Promise<{ filePath: string; thumbPath: string; written: string[] }> {
+async function importPhoto(tempPath: string): Promise<{ filePath: string; thumbPath: string; written: string[] } | null> {
+  const sharp = (await import("sharp")).default
+  let ext: string | null = null
+  try {
+    ext = safeExtFromFormat((await sharp(tempPath).metadata()).format)
+  } catch {
+    // unreadable header → treated like a disallowed format
+  }
+  if (!ext) return null
+
   const mediaUuid = crypto.randomUUID()
   const dir = join(process.cwd(), "public", "media", mediaUuid)
   await mkdir(dir, { recursive: true })
@@ -51,7 +68,6 @@ async function importPhoto(tempPath: string, ext: string): Promise<{ filePath: s
   let thumbPath = filePath
 
   try {
-    const sharp = (await import("sharp")).default
     await sharp(finalOrigPath)
       .rotate()
       .resize({ width: 400, withoutEnlargement: true })
@@ -68,6 +84,10 @@ async function importPhoto(tempPath: string, ext: string): Promise<{ filePath: s
 
 
 export async function POST(req: NextRequest) {
+  // Outside the proxy matcher (body must stream) — guard here, same functions.
+  const guard = await guardApiRequest(req)
+  if (guard) return guard
+
   if (!process.env.DATABASE_URL) {
     return NextResponse.json(
       { error: "Kein Datenbankzugang. Import nur auf dem Server mit DATABASE_URL möglich.", code: "import_no_db" },
@@ -233,7 +253,12 @@ export async function POST(req: NextRequest) {
                 continue
               }
 
-              const { filePath, thumbPath, written } = await importPhoto(tempPath, photo.filename.split(".").pop() ?? "jpg")
+              const imported = await importPhoto(tempPath)
+              if (!imported) {
+                warningsV1.push(`${entry.id}: Übersprungen, kein JPEG/PNG/WebP/GIF: ${zipPath}`)
+                continue
+              }
+              const { filePath, thumbPath, written } = imported
               writtenV1.push(...written)
               photoPathsV1.push({ filePath, thumbPath, orderIdx: photo.orderIndex ?? 0 })
             }
@@ -431,7 +456,7 @@ export async function POST(req: NextRequest) {
           const tagNamesV1 = (entry.tags ?? []).map((t: string) => t.trim()).filter(Boolean)
           if (tagNamesV1.length > 0) {
             const { rows: tagRowsV1 } = await clientV1.query(
-              `INSERT INTO tags (name) SELECT DISTINCT UNNEST($1::text[])
+              `INSERT INTO tags (name) SELECT DISTINCT UNNEST($1::text[]) ORDER BY 1
                ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name
                RETURNING id`,
               [tagNamesV1]
@@ -549,7 +574,12 @@ export async function POST(req: NextRequest) {
               continue
             }
 
-            const { filePath, thumbPath, written } = await importPhoto(tempPath, photo.type === "jpeg" ? "jpg" : photo.type)
+            const imported = await importPhoto(tempPath)
+            if (!imported) {
+              warnings.push(`${entry.uuid}: Übersprungen, kein JPEG/PNG/WebP/GIF: ${zipPath}`)
+              continue
+            }
+            const { filePath, thumbPath, written } = imported
             allWrittenFiles.push(...written)
             photoBatch.push({ filePath, thumbPath, orderIdx: photo.orderInEntry ?? 0 })
           }
@@ -680,7 +710,7 @@ export async function POST(req: NextRequest) {
         const tagNames = (entry.tags ?? []).map((t: string) => t.trim()).filter(Boolean)
         if (tagNames.length > 0) {
           const { rows: tagRows } = await client.query(
-            `INSERT INTO tags (name) SELECT DISTINCT UNNEST($1::text[])
+            `INSERT INTO tags (name) SELECT DISTINCT UNNEST($1::text[]) ORDER BY 1
              ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name
              RETURNING id`,
             [tagNames]

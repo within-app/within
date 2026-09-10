@@ -89,10 +89,10 @@ async function createEntryWithPhoto(
   expect(created.ok()).toBeTruthy()
   const { id } = (await created.json()) as { id: string }
 
+  // Raw body (the route streams it to disk); multipart is only kept for pre-#530 clients.
   const uploaded = await request.post(`/api/upload?entryId=${id}`, {
-    multipart: {
-      file: { name: "synthetic-uploaded.png", mimeType: "image/png", buffer: PNG_1PX },
-    },
+    headers: { "content-type": "image/png" },
+    data: PNG_1PX,
   })
   expect(uploaded.status()).toBe(201)
   // Ohne `id` wurde die Datei geschrieben, aber keine media-Zeile — dann prüft der

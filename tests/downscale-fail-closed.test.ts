@@ -110,9 +110,8 @@ describe("flushMedia prepareUploadBlob-Hook", () => {
     expect(result.uploaded).toBe(1)
     const uploadCall = fetchMock.mock.calls.find(([u]) => String(u).includes("/api/upload"))
     expect(uploadCall).toBeDefined()
-    const body = uploadCall![1]?.body as FormData
-    expect((body.get("file") as File).size).toBe(1000)
-    expect(body.get("clientMediaId")).toBe("outbox-1")
+    expect((uploadCall![1]?.body as Blob).size).toBe(1000)
+    expect(String(uploadCall![0])).toContain("clientMediaId=outbox-1")
   })
 
   it("ohne Hook bleibt das Verhalten unverändert (Original-Blob)", async () => {
@@ -129,7 +128,7 @@ describe("flushMedia prepareUploadBlob-Hook", () => {
 
     expect(result.uploaded).toBe(1)
     const uploadCall = fetchMock.mock.calls.find(([u]) => String(u).includes("/api/upload"))
-    expect((uploadCall![1]?.body as FormData).get("file")).toBeInstanceOf(File)
-    expect(((uploadCall![1]?.body as FormData).get("file") as File).size).toBe(500)
+    expect(uploadCall![1]?.body).toBeInstanceOf(Blob)
+    expect((uploadCall![1]?.body as Blob).size).toBe(500)
   })
 })

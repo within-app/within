@@ -65,6 +65,9 @@ const de = {
       sync_changes_failed: "Sync-Daten konnten nicht geladen werden",
       upsert_failed: "Upsert fehlgeschlagen",
       settings_save_failed: "Einstellung konnte nicht gespeichert werden",
+      restore_confirm_required: "Bestätigung fehlt",
+      restore_dump_not_found: "Diese Sicherung gibt es nicht (mehr)",
+      restore_in_progress: "Eine Wiederherstellung läuft bereits",
     },
   },
 }
@@ -134,6 +137,9 @@ const en: SectionMessages = {
       sync_changes_failed: "Sync data could not be loaded",
       upsert_failed: "Upsert failed",
       settings_save_failed: "Setting could not be saved",
+      restore_confirm_required: "Confirmation missing",
+      restore_dump_not_found: "This backup doesn't exist (anymore)",
+      restore_in_progress: "A restore is already running",
     },
   },
 }
@@ -203,6 +209,9 @@ const fr: SectionMessages = {
       sync_changes_failed: "Les données de synchronisation n'ont pas pu être chargées",
       upsert_failed: "Échec de l'upsert",
       settings_save_failed: "Le réglage n'a pas pu être enregistré",
+      restore_confirm_required: "Confirmation manquante",
+      restore_dump_not_found: "Cette sauvegarde n'existe pas (plus)",
+      restore_in_progress: "Une restauration est déjà en cours",
     },
   },
 }

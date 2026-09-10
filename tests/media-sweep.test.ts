@@ -15,7 +15,7 @@
  *
  * Nur synthetische Daten.
  */
-import { describe, it, expect } from "vitest"
+import { describe, it, expect, vi } from "vitest"
 import { readFileSync } from "fs"
 import { resolve } from "path"
 import { selectStaleTmpDirs, selectOrphanMediaDirs, MEDIA_SWEEP_MIN_AGE_MS } from "@/lib/media-sweep"
@@ -95,5 +95,27 @@ describe("Import nutzt das Volume für Temp (B31)", () => {
     const src = readFileSync(resolve(__dirname, "../src/instrumentation.ts"), "utf8")
     expect(src).toContain("sweepMediaOrphans")
     expect(src).toContain("setInterval")
+  })
+})
+
+describe("sweepMediaOrphans — Fail-safe im Restore-Fenster", () => {
+  it("media-Tabelle leer, aber Medien-Verzeichnisse vorhanden → Sweep übersprungen, nichts gelöscht, Log", async () => {
+    vi.resetModules()
+    const UUID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+    const rm = vi.fn(async () => {})
+    vi.doMock("fs/promises", () => ({
+      readdir: vi.fn(async (root: string) => (root.endsWith("media") ? [UUID] : [])),
+      stat: vi.fn(async () => ({ isDirectory: () => true, mtimeMs: 0 })),
+      rm,
+    }))
+    vi.doMock("@/lib/db", () => ({ db: { query: vi.fn(async () => ({ rows: [] })) } }))
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+    const { sweepMediaOrphans } = await import("@/lib/media-sweep")
+    expect(await sweepMediaOrphans()).toEqual({ removedTmp: 0, removedOrphans: 0 })
+    expect(rm).not.toHaveBeenCalled()
+    expect(warn.mock.calls.map((c) => String(c[0])).join("\n")).toContain("skipping orphan sweep")
+    warn.mockRestore()
+    vi.doUnmock("fs/promises")
+    vi.doUnmock("@/lib/db")
   })
 })

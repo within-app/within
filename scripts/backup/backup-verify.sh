@@ -46,6 +46,13 @@ if ! mountpoint -q "$BACKUP_DEST"; then
   exit 1
 fi
 
+# Marker file guard, see backup-full.sh.
+if [[ "${BACKUP_REQUIRE_MARKER:-false}" == "true" && ! -f "${BACKUP_DEST}/.within-backup-stick" ]]; then
+  echo "[$(date -u +%FT%TZ)] ERROR: Backup-Ziel nicht bereit: Marker-Datei ${BACKUP_DEST}/.within-backup-stick fehlt — steckt der USB-Stick?" >&2
+  record_error "Backup-Ziel nicht bereit: Marker-Datei fehlt — steckt der USB-Stick?"
+  exit 1
+fi
+
 TEMP_DB="within_verify_$$"
 LOG="${BACKUP_DEST}/logs/verify_$(date +%Y%m%d_%H%M%S).log"
 mkdir -p "${BACKUP_DEST}/logs"
@@ -133,6 +140,12 @@ verify_count() {
 verify_entries="$(verify_count "SELECT COUNT(*) FROM entries WHERE deleted_at IS NULL")"
 verify_media="$(verify_count "SELECT COUNT(*) FROM media")"
 echo "[$(date -u +%FT%TZ)] verify: entries=${verify_entries}, media=${verify_media}"
+
+# Counts next to the dump, so the app's restore picker can show
+# "N entries · M media" per backup even on a fresh installation whose
+# backup_runs table is empty. Readable by the app (the dump itself stays 600).
+printf '{"entries":%s,"media":%s}\n' "${verify_entries}" "${verify_media}" > "${latest_dump}.meta.json"
+chmod 644 "${latest_dump}.meta.json" 2>/dev/null || true
 
 # Determine status
 if [[ "${verify_entries}" -ge "${live_entries}" ]] && \

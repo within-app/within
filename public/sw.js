@@ -14,8 +14,9 @@
 // Bumping invalidates both caches in the activate handler. v4: fixed a stale-chunk edge case.
 // v5: new IDB store `mediaOutbox`, editing moved inline.
 // v6: MapLibre renderer swap — /map/ (worker pair, glyph PBFs) joins the
-//     cache-first static assets so the map keeps working offline. The worker
-//     pair is served unhashed, so maplibre-gl upgrades must bump SHELL_VER.
+//     cache-first static assets so the map keeps working offline. (Superseded:
+//     since #528 the worker pair lives under /map/<maplibre-version>/, so a
+//     maplibre-gl upgrade no longer needs a SHELL_VER bump.)
 // v7: a SW installed while logged out precached
 //     '/' as a redirect-followed response ('/' → 307 → /login, redirected:
 //     true); Chromium refuses those as navigation answers (net::ERR_FAILED).
@@ -31,7 +32,12 @@
 //     by the explicit x-within-sw marker instead of no-store. Old page
 //     chunks still keying on no-store would silently cache NOTHING against
 //     the hardened server — the bump retires them on SW update.
-const SHELL_VER = 'v9';
+// v10: maplibre-gl 6.1 → 6.9 (#523, audit fix). The unhashed worker pair
+//     under /map/ changed with it — a browser holding the v9 static cache
+//     pairs the old worker with the new bundle and the map stays blank
+//     (seen on the desktop after the 09.09. deploy; a device with fresh
+//     caches was fine). Exactly the case the v6 note asks a bump for.
+const SHELL_VER = 'v10';
 const SHELL_CACHE = `within-shell-${SHELL_VER}`;
 const STATIC_CACHE = `within-static-${SHELL_VER}`;
 // v1 held plaintext photos and is purged by the activate cleanup (it is
@@ -83,6 +89,18 @@ const NAV_PRECACHE = ['/', '/login'];
 // Cap the non-precache entries; the oldest-inserted fall out first. 40 keeps
 // every realistically revisited route offline-capable.
 const SHELL_EXTRA_CAP = 40;
+
+// Navigation network-first: how long to wait for the server before a cached
+// shell is served instead (see the fetch handler).
+const NAV_TIMEOUT_MS = 4000;
+
+function withTimeout(promise, ms) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error('timeout')), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
 
 async function pruneShellCache(cache) {
   try {
@@ -373,30 +391,39 @@ self.addEventListener('fetch', (event) => {
   // Network-first for HTML navigation — always fresh, fallback to cached shell.
   // For uncached routes (e.g. /entry/new, /entry/[id]) that fail offline,
   // fall back to the precached '/' app shell so the SPA can hydrate from IDB.
+  // "WLAN da, Pi nicht erreichbar" (away from home, host down): the plain
+  // fetch waits for the TCP timeout although the shell is cached. After
+  // NAV_TIMEOUT_MS the cache wins; without a cached shell the network answer
+  // is still awaited (a late 200 beats the offline notice). The cache put and
+  // the precache refill hang on the network promise itself, so a late answer
+  // still lands in SHELL_CACHE; the timeout only decides what is SERVED.
   if (request.headers.get('accept')?.includes('text/html')) {
+    const network = fetch(request).then((res) => {
+      if (res.ok) {
+        const clone = res.clone();
+        // waitUntil: the SW may be killed right after respondWith settles;
+        // a fire-and-forget put can silently lose the shell entry
+        // (an earlier offline incident — the phone's one online cold
+        // start did not reliably heal the cache).
+        event.waitUntil(
+          caches.open(SHELL_CACHE).then(async (c) => {
+            await c.put(request, clone);
+            // Deckel für Nicht-Precache-HTML-Einträge.
+            await pruneShellCache(c);
+          })
+        );
+        // Opportunistic self-heal: we are provably online, so restore any
+        // NAV_PRECACHE entries a "clear cache" may have wiped (activate
+        // does not re-fire in that case — sw.js is unchanged).
+        event.waitUntil(refillShellPrecache());
+      }
+      return res;
+    });
+    // Keeps the event alive until the network settles — otherwise the
+    // waitUntil calls above would throw InvalidStateError on a late answer.
+    event.waitUntil(network.catch(() => {}));
     event.respondWith(
-      fetch(request)
-        .then((res) => {
-          if (res.ok) {
-            const clone = res.clone();
-            // waitUntil: the SW may be killed right after respondWith settles;
-            // a fire-and-forget put can silently lose the shell entry
-            // (an earlier offline incident — the phone's one online cold
-            // start did not reliably heal the cache).
-            event.waitUntil(
-              caches.open(SHELL_CACHE).then(async (c) => {
-                await c.put(request, clone);
-                // Deckel für Nicht-Precache-HTML-Einträge.
-                await pruneShellCache(c);
-              })
-            );
-            // Opportunistic self-heal: we are provably online, so restore any
-            // NAV_PRECACHE entries a "clear cache" may have wiped (activate
-            // does not re-fire in that case — sw.js is unchanged).
-            event.waitUntil(refillShellPrecache());
-          }
-          return res;
-        })
+      withTimeout(network, NAV_TIMEOUT_MS)
         .catch(() =>
           caches.match(request)
             // Serve guard: never deliver a redirected cache entry to a
@@ -404,7 +431,9 @@ self.addEventListener('fetch', (event) => {
             // through to the next stage instead (heals caches poisoned
             // before the v7 redirect-free precache).
             .then((cached) => (cached && !cached.redirected ? cached : caches.match('/')))
-            .then((cached) => (cached && !cached.redirected ? cached : offlineFallbackResponse()))
+            // Nothing cached: wait for the (slow) network after all — it
+            // rejects into the offline notice below when truly unreachable.
+            .then((cached) => (cached && !cached.redirected ? cached : network))
             // Never resolve undefined or reject: respondWith(undefined) and a
             // rejected cache lookup both surface as net::ERR_FAILED. Last
             // resort is the inline offline notice.
