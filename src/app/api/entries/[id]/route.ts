@@ -47,7 +47,9 @@ export async function GET(
                'thumbnailPath',   m.thumbnail_path,
                'order',           m.order_index,
                'durationSeconds', m.duration_seconds,
-               'clientMediaId',   m.client_media_id
+               'clientMediaId',   m.client_media_id,
+               'originalName',    m.original_name,
+               'sizeBytes',       m.size_bytes
              ) ORDER BY m.order_index
            )
            FROM media m WHERE m.entry_id = e.id
@@ -257,9 +259,9 @@ export async function PUT(
         } else if (!linkedPaths.has(p.filePath)) {
           // Insert photos uploaded before the entry existed (autosave race)
           await client.query(
-            `INSERT INTO media (entry_id, type, file_path, thumbnail_path, order_index)
-             VALUES ($1, $2, $3, $4, $5)`,
-            [id, p.type ?? "photo", p.filePath, p.thumbnailPath ?? null, i]
+            `INSERT INTO media (entry_id, type, file_path, thumbnail_path, order_index, original_name, size_bytes)
+             VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+            [id, p.type ?? "photo", p.filePath, p.thumbnailPath ?? null, i, p.originalName ?? null, p.sizeBytes ?? null]
           )
           linkedPaths.add(p.filePath)
         }

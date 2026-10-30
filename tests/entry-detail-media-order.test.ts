@@ -19,8 +19,8 @@ function makeMedia(id: string, type: MediaType, order: number): Media {
 }
 
 describe("orderDetailMedia", () => {
-  it("empty media → three empty buckets", () => {
-    expect(orderDetailMedia([])).toEqual({ photos: [], videos: [], audio: [] })
+  it("empty media → four empty buckets", () => {
+    expect(orderDetailMedia([])).toEqual({ photos: [], videos: [], audio: [], pdfs: [] })
   })
 
   it("keeps every photo in the gallery — the first one is not split off as a hero", () => {
@@ -37,17 +37,25 @@ describe("orderDetailMedia", () => {
     expect(result.photos).toHaveLength(1)
   })
 
-  it("separates the three media types", () => {
+  it("separates the four media types", () => {
     const media = [
       makeMedia("p1", "photo", 0),
       makeMedia("v1", "video", 1),
       makeMedia("a1", "audio", 2),
-      makeMedia("p2", "photo", 3),
+      makeMedia("d1", "pdf", 3),
+      makeMedia("p2", "photo", 4),
     ]
-    const { photos, videos, audio } = orderDetailMedia(media)
+    const { photos, videos, audio, pdfs } = orderDetailMedia(media)
     expect(photos.map((m) => m.id)).toEqual(["p1", "p2"])
     expect(videos.map((m) => m.id)).toEqual(["v1"])
     expect(audio.map((m) => m.id)).toEqual(["a1"])
+    expect(pdfs.map((m) => m.id)).toEqual(["d1"])
+  })
+
+  it("a PDF never lands in the photo gallery (would render as a broken image)", () => {
+    const { photos, pdfs } = orderDetailMedia([makeMedia("d1", "pdf", 0)])
+    expect(photos).toHaveLength(0)
+    expect(pdfs).toHaveLength(1)
   })
 
   it("preserves the incoming order within each type", () => {

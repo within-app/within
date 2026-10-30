@@ -1,4 +1,5 @@
 import { z } from "zod"
+import { safeOriginalName } from "@/lib/upload-security"
 
 const LocationSchema = z.object({
   locationName: z.string().max(500).nullable().optional(),
@@ -12,6 +13,15 @@ const WeatherSchema = z.object({
   weatherIcon:        z.string().max(50).nullable().optional(),
 })
 
+// PDF display fields (2026-10-30). The name is display-only, but it must not
+// smuggle path separators or control characters into the DB — the upload
+// path enforces this via safeOriginalName(), the entry API does the same.
+// size_bytes is an INTEGER column: reject what Postgres would reject with a 500.
+const PdfOriginalNameSchema = z.string().max(200)
+  .refine((n) => safeOriginalName(n) === n, { message: "originalName enthält Pfad- oder Steuerzeichen" })
+  .nullable().optional()
+const PdfSizeBytesSchema = z.number().int().nonnegative().max(2_147_483_647).nullable().optional()
+
 export const CreateEntrySchema = z.object({
   text:      z.string().max(100_000).default(""),
   journalId: z.string().uuid("journalId muss eine gültige UUID sein"),
@@ -21,7 +31,12 @@ export const CreateEntrySchema = z.object({
   photos:    z.array(z.object({
     filePath:      z.string().max(500),
     thumbnailPath: z.string().max(500).optional(),
-    type:          z.enum(["photo", "video", "audio"]).optional(),
+    type:          z.enum(["photo", "video", "audio", "pdf"]).optional(),
+    // PDF display fields, handed through from the upload response when the
+    // file went up before the entry existed (autosave path). Same invariant as
+    // the upload: only a name safeOriginalName() would return unchanged.
+    originalName:  PdfOriginalNameSchema,
+    sizeBytes:     PdfSizeBytesSchema,
   })).max(50).default([]),
 }).merge(LocationSchema).merge(WeatherSchema)
 
@@ -35,7 +50,12 @@ export const UpdateEntrySchema = z.object({
     id:            z.string().uuid().optional(),
     filePath:      z.string().max(500),
     thumbnailPath: z.string().max(500).optional(),
-    type:          z.enum(["photo", "video", "audio"]).optional(),
+    type:          z.enum(["photo", "video", "audio", "pdf"]).optional(),
+    // PDF display fields, handed through from the upload response when the
+    // file went up before the entry existed (autosave path). Same invariant as
+    // the upload: only a name safeOriginalName() would return unchanged.
+    originalName:  PdfOriginalNameSchema,
+    sizeBytes:     PdfSizeBytesSchema,
   })).max(50).optional(),
   clientRevisionId: z.string().uuid().optional(),
 }).merge(LocationSchema).merge(WeatherSchema)
@@ -49,7 +69,7 @@ export const EntryQuerySchema = z.object({
   tags:      z.string().max(1000).optional().nullable(),
   starred:   z.enum(["true", "false"]).optional().nullable(),
   // "any" = Einträge mit Anlage irgendeines Typs — trägt den Sidebar-Eintrag "Medien".
-  mediaType: z.enum(["photo", "audio", "video", "any"]).optional().nullable(),
+  mediaType: z.enum(["photo", "audio", "video", "pdf", "any"]).optional().nullable(),
   before:    z.string().regex(/^\d{4}-\d{2}$/, "before muss YYYY-MM sein").optional().nullable(),
   // "true" = Einträge tragen zusätzlich Volltext + komplette Medienliste (Lese-Ansicht "An diesem Tag").
   full:      z.enum(["true", "false"]).optional().nullable(),

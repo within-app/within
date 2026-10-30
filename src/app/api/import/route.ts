@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from "next/server"
-import { mkdir, unlink, rename, copyFile, rm } from "fs/promises"
+import { mkdir, unlink, rename, copyFile, rm, stat } from "fs/promises"
 import { join } from "path"
 import { cleanText } from "@/lib/clean-text"
 import { streamUnzipToDisk, ImportZipError } from "@/lib/import-stream"
 import { mapWeatherCode, toUUID, buildLocationName } from "@/lib/dayone-import"
 import { guardApiRequest } from "@/lib/request-guard"
-import { safeExtFromFormat } from "@/lib/upload-security"
+import { safeExtFromFormat, safeOriginalName, isPdfHeader, PDF_HEADER_BYTES } from "@/lib/upload-security"
+import { readFileHead } from "@/lib/upload-stream"
 
 export const maxDuration = 120 // allow up to 2 minutes for large imports
 // Pi-safe ceiling: DayOne real exports are ~28 MB; 100 MiB (104,857,600 bytes) gives
@@ -80,6 +81,76 @@ async function importPhoto(tempPath: string): Promise<{ filePath: string; thumbP
   }
 
   return { filePath, thumbPath, written }
+}
+
+interface ImportedPdf {
+  filePath: string
+  written: string[]
+  originalName: string | null
+  sizeBytes: number | null
+}
+
+/**
+ * Moves an unpacked PDF into its own media dir. Same trust boundary as the
+ * upload (upload/route.ts): the "%PDF-" header on the unpacked bytes decides,
+ * the extension is fixed, nothing decodes the file. Returns null — BEFORE any
+ * mkdir/rename — when the file is not a PDF, so a rejected file leaves nothing
+ * behind. `originalName` is the display name from the manifest (already
+ * sanitised by the caller); the size comes from disk, the manifest's value is
+ * only the fallback.
+ */
+async function importPdf(
+  tempPath: string,
+  originalName: string | null,
+  sizeHint: number | null
+): Promise<ImportedPdf | null> {
+  let valid = false
+  try {
+    valid = isPdfHeader(await readFileHead(tempPath, PDF_HEADER_BYTES))
+  } catch {
+    // unreadable header → treated like a disallowed format
+  }
+  if (!valid) return null
+
+  const mediaUuid = crypto.randomUUID()
+  const dir = join(process.cwd(), "public", "media", mediaUuid)
+  await mkdir(dir, { recursive: true })
+
+  const origName = `${mediaUuid}-original.pdf`
+  const finalOrigPath = join(dir, origName)
+  await moveFile(tempPath, finalOrigPath)
+
+  let sizeBytes = sizeHint
+  try {
+    sizeBytes = (await stat(finalOrigPath)).size
+  } catch {
+    // keep the manifest's value
+  }
+
+  return { filePath: `/media/${mediaUuid}/${origName}`, written: [finalOrigPath], originalName, sizeBytes }
+}
+
+type PdfBatchRow = { filePath: string; orderIdx: number; originalName: string | null; sizeBytes: number | null }
+
+/** One INSERT for all PDFs of an entry — UNNEST like the other media types. */
+async function insertPdfBatch(
+  client: { query: (sql: string, params?: unknown[]) => Promise<unknown> },
+  entryId: string,
+  batch: PdfBatchRow[]
+): Promise<void> {
+  if (batch.length === 0) return
+  await client.query(
+    `INSERT INTO media (entry_id, type, file_path, thumbnail_path, order_index, original_name, size_bytes)
+     SELECT $1::uuid, 'pdf', f, NULL, o, n, s
+     FROM UNNEST($2::text[], $3::int[], $4::text[], $5::int[]) AS u(f, o, n, s)`,
+    [
+      entryId,
+      batch.map(p => p.filePath),
+      batch.map(p => p.orderIdx),
+      batch.map(p => p.originalName),
+      batch.map(p => p.sizeBytes),
+    ]
+  )
 }
 
 
@@ -237,6 +308,7 @@ export async function POST(req: NextRequest) {
         const photoPathsV1: { filePath: string; thumbPath: string; orderIdx: number }[] = []
         const videoPathsV1: { filePath: string; thumbPath: string | null; previewPath: string | null; orderIdx: number; duration: number | null }[] = []
         const audioPathsV1: { filePath: string; orderIdx: number; duration: number | null }[] = []
+        const pdfPathsV1: PdfBatchRow[] = []
         let fileIoErrV1: string | null = null
 
         try {
@@ -357,6 +429,32 @@ export async function POST(req: NextRequest) {
               })
             }
           }
+
+          if (entry.pdfs && entry.pdfs.length > 0) {
+            const sortedPdfs = [...entry.pdfs].sort(
+              (a, b) => (a.orderIndex ?? 0) - (b.orderIndex ?? 0)
+            )
+            for (const pdf of sortedPdfs) {
+              const zipPath = `pdfs/${entry.id}/${pdf.filename}`
+              const tempPath = diskFiles.get(zipPath)
+              if (!tempPath) {
+                warningsV1.push(`${entry.id}: Datei fehlt im ZIP: ${zipPath}`)
+                continue
+              }
+              const imported = await importPdf(tempPath, safeOriginalName(pdf.originalName), pdf.sizeBytes ?? null)
+              if (!imported) {
+                warningsV1.push(`${entry.id}: Übersprungen, keine PDF-Datei: ${zipPath}`)
+                continue
+              }
+              writtenV1.push(...imported.written)
+              pdfPathsV1.push({
+                filePath: imported.filePath,
+                orderIdx: pdf.orderIndex ?? 0,
+                originalName: imported.originalName,
+                sizeBytes: imported.sizeBytes,
+              })
+            }
+          }
         } catch (err) {
           fileIoErrV1 = err instanceof Error ? err.message : String(err)
         }
@@ -451,6 +549,8 @@ export async function POST(req: NextRequest) {
               ]
             )
           }
+
+          await insertPdfBatch(clientV1, entry.id, pdfPathsV1)
 
           // ── Tags ───────────────────────────────────────────────────────
           const tagNamesV1 = (entry.tags ?? []).map((t: string) => t.trim()).filter(Boolean)
@@ -558,6 +658,7 @@ export async function POST(req: NextRequest) {
       const allWrittenFiles: string[] = []
       const photoBatch: { filePath: string; thumbPath: string; orderIdx: number }[] = []
       const videoBatch: { filePath: string; orderIdx: number; duration: number | null }[] = []
+      const pdfBatch: PdfBatchRow[] = []
       let fileIoErr: string | null = null
 
       try {
@@ -608,6 +709,34 @@ export async function POST(req: NextRequest) {
               filePath: `/media/${mediaUuid}/${origName}`,
               orderIdx: video.orderInEntry ?? 0,
               duration: video.duration ? Math.round(video.duration) : null,
+            })
+          }
+        }
+
+        // Day One: pdfAttachments[] → pdfs/<md5>.pdf; pdfName is the user's
+        // file name, fileSize only the fallback for the size on disk.
+        if (entry.pdfAttachments && entry.pdfAttachments.length > 0) {
+          const sortedPdfs = [...entry.pdfAttachments].sort(
+            (a, b) => (a.orderInEntry ?? 0) - (b.orderInEntry ?? 0)
+          )
+          for (const pdf of sortedPdfs) {
+            const zipPath = `pdfs/${pdf.md5}.${pdf.type || "pdf"}`
+            const tempPath = diskFiles.get(zipPath)
+            if (!tempPath) {
+              warnings.push(`${entry.uuid}: Datei fehlt im ZIP: ${zipPath}`)
+              continue
+            }
+            const imported = await importPdf(tempPath, safeOriginalName(pdf.pdfName), pdf.fileSize ?? null)
+            if (!imported) {
+              warnings.push(`${entry.uuid}: Übersprungen, keine PDF-Datei: ${zipPath}`)
+              continue
+            }
+            allWrittenFiles.push(...imported.written)
+            pdfBatch.push({
+              filePath: imported.filePath,
+              orderIdx: pdf.orderInEntry ?? 0,
+              originalName: imported.originalName,
+              sizeBytes: imported.sizeBytes,
             })
           }
         }
@@ -706,6 +835,9 @@ export async function POST(req: NextRequest) {
           )
         }
 
+        // ── PDFs ─────────────────────────────────────────────────────────
+        await insertPdfBatch(client, entryId, pdfBatch)
+
         // ── Tags — batch-upsert names, then batch-link to entry ────────────
         const tagNames = (entry.tags ?? []).map((t: string) => t.trim()).filter(Boolean)
         if (tagNames.length > 0) {
@@ -776,6 +908,13 @@ interface WithinV1Audio {
   durationSeconds?: number | null
 }
 
+interface WithinV1Pdf {
+  filename: string
+  orderIndex?: number
+  originalName?: string | null
+  sizeBytes?: number | null
+}
+
 interface WithinV1Entry {
   id: string
   journalId: string
@@ -789,6 +928,7 @@ interface WithinV1Entry {
   photos?: WithinV1Photo[]
   videos?: WithinV1Video[]
   audios?: WithinV1Audio[]
+  pdfs?: WithinV1Pdf[]
 }
 
 interface WithinV1Export {
@@ -816,6 +956,15 @@ interface DayOneVideo {
   height?: number
 }
 
+interface DayOnePdfAttachment {
+  identifier: string
+  md5: string
+  type: string        // "pdf"
+  pdfName?: string    // the user's file name
+  fileSize?: number
+  orderInEntry?: number
+}
+
 interface DayOneEntry {
   uuid: string
   text?: string
@@ -825,6 +974,7 @@ interface DayOneEntry {
   tags?: string[]
   photos?: DayOnePhoto[]
   videos?: DayOneVideo[]
+  pdfAttachments?: DayOnePdfAttachment[]
   location?: {
     latitude?: number
     longitude?: number

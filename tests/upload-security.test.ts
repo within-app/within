@@ -11,6 +11,8 @@ import {
   detectMediaTypeFromMime,
   getMaxBytesForType,
   getMaxMBForType,
+  isPdfHeader,
+  safeOriginalName,
 } from "../src/lib/upload-security"
 
 describe("safeExtFromFormat", () => {
@@ -68,8 +70,12 @@ describe("safeExtFromMime", () => {
     expect(safeExtFromMime("image/png")).toBeNull()
   })
 
+  it("maps application/pdf to pdf", () => {
+    expect(safeExtFromMime("application/pdf")).toBe("pdf")
+  })
+
   it("returns null for unrelated MIME types", () => {
-    expect(safeExtFromMime("application/pdf")).toBeNull()
+    expect(safeExtFromMime("application/zip")).toBeNull()
     expect(safeExtFromMime("text/html")).toBeNull()
     expect(safeExtFromMime("")).toBeNull()
   })
@@ -107,8 +113,14 @@ describe("detectMediaTypeFromMime", () => {
     expect(detectMediaTypeFromMime("audio/flac")).toBeNull()
   })
 
+  it("classifies application/pdf as 'pdf' (explicit allowlist, no application/* wildcard)", () => {
+    expect(detectMediaTypeFromMime("application/pdf")).toBe("pdf")
+    expect(detectMediaTypeFromMime("application/zip")).toBeNull()
+    expect(detectMediaTypeFromMime("application/octet-stream")).toBeNull()
+  })
+
   it("returns null for unrelated MIME types", () => {
-    expect(detectMediaTypeFromMime("application/pdf")).toBeNull()
+    expect(detectMediaTypeFromMime("text/html")).toBeNull()
     expect(detectMediaTypeFromMime("text/plain")).toBeNull()
     expect(detectMediaTypeFromMime("")).toBeNull()
   })
@@ -136,5 +148,56 @@ describe("getMaxBytesForType + getMaxMBForType", () => {
     for (const t of ["video", "audio", "photo"] as const) {
       expect(getMaxBytesForType(t)).toBe(getMaxMBForType(t) * 1024 * 1024)
     }
+  })
+})
+
+// ── PDF (vierter Medientyp, 2026-10-30) ──────────────────────────────────────
+
+describe("PDF — size limit", () => {
+  it("pdf limit defaults to 50 MB", () => {
+    expect(getMaxMBForType("pdf")).toBe(50)
+    expect(getMaxBytesForType("pdf")).toBe(50 * 1024 * 1024)
+  })
+})
+
+describe("isPdfHeader — content check on the stored bytes, not on the client MIME", () => {
+  it("accepts a file that starts with %PDF-", () => {
+    expect(isPdfHeader(new TextEncoder().encode("%PDF-1.7\n%\xe2\xe3"))).toBe(true)
+    expect(isPdfHeader(new TextEncoder().encode("%PDF-1.4"))).toBe(true)
+  })
+
+  it("rejects anything else — HTML, JPEG magic, empty, too short", () => {
+    expect(isPdfHeader(new TextEncoder().encode("<!doctype html>"))).toBe(false)
+    expect(isPdfHeader(new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10]))).toBe(false)
+    expect(isPdfHeader(new Uint8Array(0))).toBe(false)
+    expect(isPdfHeader(new TextEncoder().encode("%PDF"))).toBe(false)
+  })
+
+  it("rejects a header preceded by junk bytes (no sniffing past offset 0)", () => {
+    expect(isPdfHeader(new TextEncoder().encode("xx%PDF-1.7"))).toBe(false)
+  })
+})
+
+describe("safeOriginalName — client file name for display only", () => {
+  it("keeps an ordinary name", () => {
+    expect(safeOriginalName("Rechnung 2024-03.pdf")).toBe("Rechnung 2024-03.pdf")
+  })
+
+  it("strips path components and control characters", () => {
+    expect(safeOriginalName("../../etc/passwd")).toBe("passwd")
+    expect(safeOriginalName("C:\\Users\\x\\notes.pdf")).toBe("notes.pdf")
+    expect(safeOriginalName("a\u0000b\u001fc.pdf")).toBe("abc.pdf")
+  })
+
+  it("caps the length at 200 characters", () => {
+    const long = "x".repeat(300) + ".pdf"
+    expect(safeOriginalName(long)!.length).toBe(200)
+  })
+
+  it("returns null for null, empty or whitespace-only input", () => {
+    expect(safeOriginalName(null)).toBeNull()
+    expect(safeOriginalName("")).toBeNull()
+    expect(safeOriginalName("   ")).toBeNull()
+    expect(safeOriginalName("..")).toBeNull()
   })
 })

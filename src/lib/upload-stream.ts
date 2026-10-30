@@ -1,4 +1,5 @@
 import { createWriteStream } from "fs"
+import { open } from "fs/promises"
 import { pipeline } from "stream/promises"
 import { Readable } from "stream"
 
@@ -31,4 +32,19 @@ export async function saveBodyToDisk(
     createWriteStream(destPath, { flush: true })
   )
   return total
+}
+
+/**
+ * Reads the first `bytes` of a file — for content checks that need only the
+ * header (PDF magic). Opens, reads one small buffer, closes; never the file.
+ */
+export async function readFileHead(path: string, bytes: number): Promise<Uint8Array> {
+  const handle = await open(path, "r")
+  try {
+    const buf = new Uint8Array(bytes)
+    const { bytesRead } = await handle.read(buf, 0, bytes, 0)
+    return buf.subarray(0, bytesRead)
+  } finally {
+    await handle.close()
+  }
 }

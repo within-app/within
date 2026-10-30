@@ -22,9 +22,14 @@ const mockRename = vi.fn().mockResolvedValue(undefined)
 vi.mock("fs/promises", () => ({ mkdir: mockMkdir, writeFile: mockWriteFile, rm: mockRm, rename: mockRename }))
 
 const mockSaveBodyToDisk = vi.fn().mockResolvedValue(0)
+// PDF content check reads the first bytes of the stored file; the default
+// stands in for a real PDF header, single tests override it.
+const PDF_HEAD = new TextEncoder().encode("%PDF-1.7\n")
+const mockReadFileHead = vi.fn().mockResolvedValue(PDF_HEAD)
 vi.mock("@/lib/upload-stream", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/upload-stream")>()),
   saveBodyToDisk: mockSaveBodyToDisk,
+  readFileHead: mockReadFileHead,
 }))
 
 const mockExtractPoster = vi.fn().mockResolvedValue("/media/synth-uuid/poster.webp")
@@ -63,8 +68,12 @@ function makeUploadReq(opts: {
   fileType: string
   fileSize?: number
   entryId?: string
+  fileName?: string
 }) {
-  const url = `http://localhost/api/upload${opts.entryId ? `?entryId=${opts.entryId}` : ""}`
+  const qs = new URLSearchParams()
+  if (opts.entryId) qs.set("entryId", opts.entryId)
+  if (opts.fileName !== undefined) qs.set("fileName", opts.fileName)
+  const url = `http://localhost/api/upload${qs.size > 0 ? `?${qs}` : ""}`
   return new NextRequest(url, {
     method: "POST",
     headers: {
@@ -118,9 +127,18 @@ describe("upload route — MIME allowlist", () => {
     expect(res.status).toBe(400)
   })
 
-  it("rejects application/pdf", async () => {
+  it("rejects application/zip and application/octet-stream — no application/* wildcard", async () => {
+    for (const fileType of ["application/zip", "application/octet-stream"]) {
+      const res = await POST(makeUploadReq({ fileType, entryId: "e-1" }))
+      expect(res.status).toBe(400)
+    }
+  })
+
+  it("accepts application/pdf — returns 201 with type='pdf'", async () => {
     const res = await POST(makeUploadReq({ fileType: "application/pdf", entryId: "e-1" }))
-    expect(res.status).toBe(400)
+    expect(res.status).toBe(201)
+    const body = await res.json() as { type: string }
+    expect(body.type).toBe("pdf")
   })
 
   it("accepts video/mp4 — returns 201 with type='video'", async () => {
@@ -349,5 +367,104 @@ describe("upload route — video/audio content validation", () => {
     const res = await POST(makeUploadReq({ fileType: "audio/mpeg", entryId: "e-1" }))
 
     expect(res.status).toBe(201)
+  })
+})
+
+// ── PDF (vierter Medientyp, 2026-10-30) ──────────────────────────────────────
+
+describe("upload route — PDF", () => {
+  const WRITTEN = 819175
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockReadFileHead.mockResolvedValue(PDF_HEAD)
+    // Der Zähler aus saveBodyToDisk ist die Wahrheit für size_bytes.
+    mockSaveBodyToDisk.mockResolvedValue(WRITTEN)
+    seedDb()
+  })
+
+  it("stores the file under a .pdf extension derived from the allowlist, never from the client name", async () => {
+    const res = await POST(makeUploadReq({ fileType: "application/pdf", entryId: "e-1", fileName: "evil.html" }))
+    expect(res.status).toBe(201)
+    const body = await res.json() as { filePath: string }
+    expect(body.filePath).toMatch(/\/media\/[0-9a-f-]+\/[0-9a-f-]+-original\.pdf$/)
+  })
+
+  it("rejects a body whose bytes are not a PDF although the MIME says so (fail-closed) and removes the upload dir", async () => {
+    mockReadFileHead.mockResolvedValue(new TextEncoder().encode("<!doctype html><script>"))
+    const res = await POST(makeUploadReq({ fileType: "application/pdf", entryId: "e-1" }))
+    expect(res.status).toBe(400)
+    const body = await res.json() as { code: string }
+    expect(body.code).toBe("invalid_pdf_content")
+    expect(mockRm).toHaveBeenCalled()
+    const insertCall = mockDbQuery.mock.calls.find(
+      ([sql]: unknown[]) => typeof sql === "string" && sql.includes("INSERT INTO media")
+    )
+    expect(insertCall).toBeUndefined()
+  })
+
+  it("rejects an unreadable header the same way (no exception leaks)", async () => {
+    mockReadFileHead.mockRejectedValue(new Error("EIO"))
+    const res = await POST(makeUploadReq({ fileType: "application/pdf", entryId: "e-1" }))
+    expect(res.status).toBe(400)
+  })
+
+  it("rejects application/pdf exceeding 50 MB and accepts exactly 50 MB", async () => {
+    const over = 50 * 1024 * 1024 + 1
+    const resOver = await POST(makeUploadReq({ fileType: "application/pdf", fileSize: over, entryId: "e-1" }))
+    expect(resOver.status).toBe(400)
+    const body = await resOver.json() as { error: string; kind: string }
+    expect(body.error).toMatch(/50 MB/)
+    expect(body.kind).toBe("pdf")
+
+    const resExact = await POST(makeUploadReq({ fileType: "application/pdf", fileSize: 50 * 1024 * 1024, entryId: "e-1" }))
+    expect(resExact.status).toBe(201)
+  })
+
+  it("DB INSERT binds type 'pdf', the sanitised original name and the size in bytes", async () => {
+    const res = await POST(makeUploadReq({
+      fileType: "application/pdf", entryId: "e-1", fileSize: 819175, fileName: "../Rechnung 2024.pdf",
+    }))
+    expect(res.status).toBe(201)
+    const insertCall = mockDbQuery.mock.calls.find(
+      ([sql]: unknown[]) => typeof sql === "string" && sql.includes("INSERT INTO media")
+    )
+    expect(insertCall).toBeDefined()
+    const [sql, params] = insertCall as [string, unknown[]]
+    expect(sql).toMatch(/original_name/)
+    expect(sql).toMatch(/size_bytes/)
+    expect(params).toContain("pdf")
+    expect(params).toContain("Rechnung 2024.pdf")
+    expect(params).toContain(819175)
+    const body = await res.json() as { originalName?: string; sizeBytes?: number }
+    expect(body.originalName).toBe("Rechnung 2024.pdf")
+    expect(body.sizeBytes).toBe(819175)
+  })
+
+  it("size_bytes is what was written, not the content-length header", async () => {
+    const res = await POST(makeUploadReq({ fileType: "application/pdf", entryId: "e-1", fileSize: 1000 }))
+    expect(res.status).toBe(201)
+    const [, params] = mockDbQuery.mock.calls.find(
+      ([sql]: unknown[]) => typeof sql === "string" && sql.includes("INSERT INTO media")
+    ) as [string, unknown[]]
+    expect(params).toContain(WRITTEN)
+    expect(params).not.toContain(1000)
+    const body = await res.json() as { sizeBytes?: number }
+    expect(body.sizeBytes).toBe(WRITTEN)
+  })
+
+  it("without a fileName the row carries original_name = null (nothing invented)", async () => {
+    await POST(makeUploadReq({ fileType: "application/pdf", entryId: "e-1" }))
+    const insertCall = mockDbQuery.mock.calls.find(
+      ([sql]: unknown[]) => typeof sql === "string" && sql.includes("INSERT INTO media")
+    )
+    const [, params] = insertCall as [string, unknown[]]
+    expect(params).toContain(null)
+  })
+
+  it("never calls ffprobe/sharp for a PDF (no decoder touches the file)", async () => {
+    await POST(makeUploadReq({ fileType: "application/pdf", entryId: "e-1" }))
+    expect(mockProbeMediaStreams).not.toHaveBeenCalled()
+    expect(mockProbeDuration).not.toHaveBeenCalled()
+    expect(mockExtractPoster).not.toHaveBeenCalled()
   })
 })

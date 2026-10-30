@@ -45,6 +45,32 @@ describe("schema.sql — fresh-DB regression", () => {
     await expect(client.query("INSERT INTO backup_runs (status) VALUES ('bogus')")).rejects.toThrow()
   }, 30_000)
 
+  it("media.type accepts 'pdf', media carries original_name/size_bytes, and the block is idempotent on a second apply", async () => {
+    await client.query(readFileSync(SCHEMA_PATH, "utf-8"))
+    const { rows: [journal] } = await client.query<{ id: string }>(
+      "INSERT INTO journals (name, color) VALUES ('synth-pdf', '#000000') RETURNING id"
+    )
+    const { rows: [entry] } = await client.query<{ id: string }>(
+      "INSERT INTO entries (journal_id, text, created_at, updated_at) VALUES ($1, 'synthetic', now(), now()) RETURNING id",
+      [journal.id]
+    )
+    await expect(
+      client.query(
+        `INSERT INTO media (entry_id, type, file_path, original_name, size_bytes)
+         VALUES ($1, 'pdf', '/media/synth/synth-original.pdf', 'synth.pdf', 4096)`,
+        [entry.id]
+      )
+    ).resolves.toBeDefined()
+    await expect(
+      client.query("INSERT INTO media (entry_id, type, file_path) VALUES ($1, 'document', '/media/x/x.bin')", [entry.id])
+    ).rejects.toThrow()
+    const { rows } = await client.query<{ pg_get_constraintdef: string }>(
+      "SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname = 'media_type_check'"
+    )
+    expect(rows).toHaveLength(1)
+    expect(rows[0].pg_get_constraintdef).toMatch(/pdf/)
+  }, 30_000)
+
   it("Zeitzone P4: idx_entries_month_day and month_day_utc() are gone (superseded by a zoned function, no functional index)", async () => {
     const indexResult = await client.query<{ indexdef: string }>(`
       SELECT indexdef FROM pg_indexes

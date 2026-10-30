@@ -53,10 +53,10 @@ const de = {
   uploader: {
     dropzoneText: "Medien hierher ziehen oder",
     dropzoneSelect: "auswählen",
-    hint: "Foto (JPG/PNG/WebP/GIF, max. 20 MB) · Video (MP4/MOV, max. 100 MB) · Audio (MP3/M4A/AAC, max. 50 MB)",
-    formatNotAllowed: "Dateiformat nicht erlaubt (MP4, MOV, MP3, M4A, AAC, JPG, PNG, WebP, GIF).",
-    tooLarge: (maxMB: number, kind: "video" | "audio" | "photo") => {
-      const label = kind === "video" ? "Videos" : kind === "audio" ? "Audio" : "Bilder"
+    hint: "Foto (JPG/PNG/WebP/GIF, max. 20 MB) · Video (MP4/MOV, max. 100 MB) · Audio (MP3/M4A/AAC, max. 50 MB) · PDF (max. 50 MB)",
+    formatNotAllowed: "Dateiformat nicht erlaubt (MP4, MOV, MP3, M4A, AAC, JPG, PNG, WebP, GIF, PDF).",
+    tooLarge: (maxMB: number, kind: "video" | "audio" | "photo" | "pdf") => {
+      const label = kind === "video" ? "Videos" : kind === "audio" ? "Audio" : kind === "pdf" ? "PDFs" : "Bilder"
       return `Datei ist zu groß (max. ${maxMB} MB für ${label}).`
     },
     uploadFailed: "Upload fehlgeschlagen",
@@ -66,6 +66,7 @@ const de = {
     offlineFailed: (nameSuffix: string) => `Offline-Anhang fehlgeschlagen${nameSuffix}`,
     videoLabel: "Video",
     audioLabel: "Audio",
+    pdfLabel: "PDF",
     pendingBadge: "Wartet",
     pendingTitle: "Wird beim nächsten Online-Gang hochgeladen",
     removeAria: "Medien entfernen",
@@ -141,10 +142,10 @@ const en: SectionMessages = {
   uploader: {
     dropzoneText: "Drag media here or",
     dropzoneSelect: "choose files",
-    hint: "Photo (JPG/PNG/WebP/GIF, max. 20 MB) · Video (MP4/MOV, max. 100 MB) · Audio (MP3/M4A/AAC, max. 50 MB)",
-    formatNotAllowed: "File format not allowed (MP4, MOV, MP3, M4A, AAC, JPG, PNG, WebP, GIF).",
-    tooLarge: (maxMB: number, kind: "video" | "audio" | "photo") => {
-      const label = kind === "video" ? "videos" : kind === "audio" ? "audio" : "photos"
+    hint: "Photo (JPG/PNG/WebP/GIF, max. 20 MB) · Video (MP4/MOV, max. 100 MB) · Audio (MP3/M4A/AAC, max. 50 MB) · PDF (max. 50 MB)",
+    formatNotAllowed: "File format not allowed (MP4, MOV, MP3, M4A, AAC, JPG, PNG, WebP, GIF, PDF).",
+    tooLarge: (maxMB: number, kind: "video" | "audio" | "photo" | "pdf") => {
+      const label = kind === "video" ? "videos" : kind === "audio" ? "audio" : kind === "pdf" ? "PDFs" : "photos"
       return `File is too large (max. ${maxMB} MB for ${label}).`
     },
     uploadFailed: "Upload failed",
@@ -154,6 +155,7 @@ const en: SectionMessages = {
     offlineFailed: (nameSuffix: string) => `Offline attachment failed${nameSuffix}`,
     videoLabel: "Video",
     audioLabel: "Audio",
+    pdfLabel: "PDF",
     pendingBadge: "Pending",
     pendingTitle: "Will upload the next time you're online",
     removeAria: "Remove media",
@@ -227,10 +229,10 @@ const fr: SectionMessages = {
   uploader: {
     dropzoneText: "Glisse des médias ici ou",
     dropzoneSelect: "choisis-les",
-    hint: "Photo (JPG/PNG/WebP/GIF, max. 20 Mo) · Vidéo (MP4/MOV, max. 100 Mo) · Audio (MP3/M4A/AAC, max. 50 Mo)",
-    formatNotAllowed: "Format de fichier non autorisé (MP4, MOV, MP3, M4A, AAC, JPG, PNG, WebP, GIF).",
-    tooLarge: (maxMB: number, kind: "video" | "audio" | "photo") => {
-      const label = kind === "video" ? "les vidéos" : kind === "audio" ? "l'audio" : "les photos"
+    hint: "Photo (JPG/PNG/WebP/GIF, max. 20 Mo) · Vidéo (MP4/MOV, max. 100 Mo) · Audio (MP3/M4A/AAC, max. 50 Mo) · PDF (max. 50 Mo)",
+    formatNotAllowed: "Format de fichier non autorisé (MP4, MOV, MP3, M4A, AAC, JPG, PNG, WebP, GIF, PDF).",
+    tooLarge: (maxMB: number, kind: "video" | "audio" | "photo" | "pdf") => {
+      const label = kind === "video" ? "les vidéos" : kind === "audio" ? "l'audio" : kind === "pdf" ? "les PDF" : "les photos"
       return `Fichier trop volumineux (max. ${maxMB} Mo pour ${label}).`
     },
     uploadFailed: "Échec de l'envoi",
@@ -240,6 +242,7 @@ const fr: SectionMessages = {
     offlineFailed: (nameSuffix: string) => `Échec de la pièce jointe hors ligne${nameSuffix}`,
     videoLabel: "Vidéo",
     audioLabel: "Audio",
+    pdfLabel: "PDF",
     pendingBadge: "En attente",
     pendingTitle: "Sera envoyé à la prochaine connexion",
     removeAria: "Supprimer le média",

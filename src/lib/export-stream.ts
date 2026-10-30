@@ -22,6 +22,18 @@ export function buildExportLocationWeather(row: {
 }
 
 /**
+ * ZIP folder per media type — the import reads the same names
+ * (photos/, videos/, audios/, pdfs/). Unknown types fall back to audios/ as
+ * before so an export never drops a file.
+ */
+export function exportFolderFor(type: string): string {
+  if (type === "photo") return "photos"
+  if (type === "video") return "videos"
+  if (type === "pdf")   return "pdfs"
+  return "audios"
+}
+
+/**
  * Create a streaming ZIP archive as a Web ReadableStream.
  *
  * Pipes archiver directly into a PassThrough → Web ReadableStream so the ZIP

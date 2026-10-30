@@ -8,9 +8,13 @@ import {
   detectMediaTypeFromMime,
   getMaxBytesForType,
   getMaxMBForType,
+  isPdfHeader,
+  safeOriginalName,
+  PDF_HEADER_BYTES,
+  type UploadMediaType,
 } from "@/lib/upload-security"
 import { extractPoster, generateLoopClip, probeDuration, probeMediaStreams } from "@/lib/video-thumbnail"
-import { saveBodyToDisk, UploadTooLargeError } from "@/lib/upload-stream"
+import { saveBodyToDisk, readFileHead, UploadTooLargeError } from "@/lib/upload-stream"
 import { guardApiRequest } from "@/lib/request-guard"
 import type { Pool } from "pg"
 
@@ -40,20 +44,23 @@ interface AttachedRow {
  */
 async function insertMediaRow(db: Pool, params: {
   entryId: string
-  type: "photo" | "video" | "audio"
+  type: UploadMediaType
   filePath: string
   thumbnailPath: string | null
   durationSeconds: number | null
   clientMediaId: string | null
   uploadDir: string
+  /** Display name and size — set for PDFs, null for the other types. */
+  originalName: string | null
+  sizeBytes: number | null
 }): Promise<AttachedRow | null> {
   // order_index atomically inside the INSERT — a separate MAX()+1 read gave two
   // concurrent uploads to the same entry the same index (unstable UI order).
   const { rows: [media] } = await db.query(
-    `INSERT INTO media (entry_id, type, file_path, thumbnail_path, duration_seconds, order_index, client_media_id)
+    `INSERT INTO media (entry_id, type, file_path, thumbnail_path, duration_seconds, order_index, client_media_id, original_name, size_bytes)
      VALUES ($1,$2,$3,$4,$5,
        (SELECT COALESCE(MAX(order_index), -1) + 1 FROM media WHERE entry_id = $1),
-       $6)
+       $6,$7,$8)
      ON CONFLICT (client_media_id) WHERE client_media_id IS NOT NULL DO NOTHING
      RETURNING id`,
     [
@@ -63,6 +70,8 @@ async function insertMediaRow(db: Pool, params: {
       params.thumbnailPath,
       params.durationSeconds,
       params.clientMediaId,
+      params.originalName,
+      params.sizeBytes,
     ]
   )
   if (media) {
@@ -115,9 +124,13 @@ async function attachOrFail(
   }
 }
 
-function tooLarge(mediaType: "photo" | "video" | "audio"): NextResponse {
+function tooLarge(mediaType: UploadMediaType): NextResponse {
   const maxMB = getMaxMBForType(mediaType)
-  const label = mediaType === "video" ? "Videos" : mediaType === "audio" ? "Audio" : "Bilder"
+  const label =
+    mediaType === "video" ? "Videos" :
+    mediaType === "audio" ? "Audio" :
+    mediaType === "pdf"   ? "PDFs" :
+    "Bilder"
   return NextResponse.json(
     { error: `Datei zu groß (max. ${maxMB} MB für ${label})`, code: "file_too_large", maxMB, kind: mediaType },
     { status: 400 }
@@ -141,6 +154,9 @@ export async function POST(req: NextRequest) {
   let contentType = (req.headers.get("content-type") ?? "").split(";")[0].trim()
   let contentLength: string
   let clientMediaIdRaw: FormDataEntryValue | null
+  // The raw-body upload carries no file name; PDFs send it as ?fileName= for
+  // display (never used as a path — see safeOriginalName).
+  let clientFileName: string | null
   if (contentType.startsWith("multipart/")) {
     // intentionally transitional: multipart path for pre-#530 clients (their
     // cached JS still sends FormData; buffers like before). Remove after 2026-10-15.
@@ -158,16 +174,18 @@ export async function POST(req: NextRequest) {
     contentType = file.type
     contentLength = String(file.size)
     clientMediaIdRaw = formData.get("clientMediaId")
+    clientFileName = file.name
   } else {
     body = req.body
     contentLength = req.headers.get("content-length") ?? ""
     clientMediaIdRaw = req.nextUrl.searchParams.get("clientMediaId")
+    clientFileName = req.nextUrl.searchParams.get("fileName")
   }
 
   const mediaType = detectMediaTypeFromMime(contentType)
   if (!mediaType) {
     return NextResponse.json(
-      { error: "Dateiformat nicht erlaubt (MP4, MOV, MP3, M4A, AAC, JPG, PNG, WebP, GIF)", code: "file_type_not_allowed" },
+      { error: "Dateiformat nicht erlaubt (MP4, MOV, MP3, M4A, AAC, JPG, PNG, WebP, GIF, PDF)", code: "file_type_not_allowed" },
       { status: 400 }
     )
   }
@@ -180,6 +198,7 @@ export async function POST(req: NextRequest) {
   if (Number(contentLength) > maxBytes) return tooLarge(mediaType)
 
   const clientMediaId = parseClientMediaId(clientMediaIdRaw)
+  const displayName = mediaType === "pdf" ? safeOriginalName(clientFileName) : null
 
   // Settle idempotency and entry existence BEFORE bytes hit the
   // disk. Best-effort — a DB hiccup here falls through to today's behavior
@@ -190,7 +209,7 @@ export async function POST(req: NextRequest) {
 
       if (clientMediaId) {
         const { rows: [existing] } = await db.query(
-          `SELECT id, type, file_path, thumbnail_path FROM media WHERE client_media_id = $1`,
+          `SELECT id, type, file_path, thumbnail_path, original_name, size_bytes FROM media WHERE client_media_id = $1`,
           [clientMediaId]
         )
         if (existing) {
@@ -201,6 +220,8 @@ export async function POST(req: NextRequest) {
               filePath: existing.file_path,
               thumbnailPath: existing.thumbnail_path,
               type: existing.type,
+              originalName: existing.original_name ?? null,
+              sizeBytes: existing.size_bytes ?? null,
             },
             { status: 201 }
           )
@@ -285,12 +306,51 @@ export async function POST(req: NextRequest) {
 
     if (entryId && process.env.DATABASE_URL) {
       return attachOrFail(
-        { entryId, type: "photo", filePath, thumbnailPath: thumbPath, durationSeconds: null, clientMediaId, uploadDir: dir },
+        { entryId, type: "photo", filePath, thumbnailPath: thumbPath, durationSeconds: null, clientMediaId, uploadDir: dir, originalName: null, sizeBytes: null },
         (row) => ({ id: row.id, filePath: row.filePath, thumbnailPath: row.thumbnailPath, type: "photo" })
       )
     }
 
     return NextResponse.json({ filePath, thumbnailPath: thumbPath, type: "photo" }, { status: 201 })
+  }
+
+  // ── PDF path ─────────────────────────────────────────────────────────────
+  // No decoder touches the file (no poppler, no pdf.js): the content check is
+  // the "%PDF-" header on the STORED bytes, fail-closed like sharp for photos.
+  // The browser's own sandboxed viewer renders the PDF later via /media/.
+  if (mediaType === "pdf") {
+    const originalFileName = `${uuid}-original.pdf`
+    const originalFsPath = join(dir, originalFileName)
+    let written: number
+    try {
+      written = await saveBodyToDisk(body, originalFsPath, maxBytes)
+    } catch (err) {
+      await removeUploadDir(dir)
+      if (err instanceof UploadTooLargeError) return tooLarge(mediaType)
+      throw err
+    }
+    let validHeader = false
+    try {
+      validHeader = isPdfHeader(await readFileHead(originalFsPath, PDF_HEADER_BYTES))
+    } catch (err) {
+      logWarn("[upload] reading the PDF header failed:", err)
+    }
+    if (!validHeader) {
+      await removeUploadDir(dir)
+      return NextResponse.json({ error: "Keine gültige PDF-Datei", code: "invalid_pdf_content" }, { status: 400 })
+    }
+    const filePath = `/media/${uuid}/${originalFileName}`
+    // Bytes actually written (a zero count cannot pass the header check above).
+    const sizeBytes = written
+
+    if (entryId && process.env.DATABASE_URL) {
+      return attachOrFail(
+        { entryId, type: "pdf", filePath, thumbnailPath: null, durationSeconds: null, clientMediaId, uploadDir: dir, originalName: displayName, sizeBytes },
+        (row) => ({ id: row.id, filePath: row.filePath, type: "pdf", originalName: displayName, sizeBytes })
+      )
+    }
+
+    return NextResponse.json({ filePath, type: "pdf", originalName: displayName, sizeBytes }, { status: 201 })
   }
 
   // ── Video / Audio path ───────────────────────────────────────────────────
@@ -332,7 +392,7 @@ export async function POST(req: NextRequest) {
 
     if (entryId && process.env.DATABASE_URL) {
       return attachOrFail(
-        { entryId, type: "video", filePath, thumbnailPath, durationSeconds, clientMediaId, uploadDir: dir },
+        { entryId, type: "video", filePath, thumbnailPath, durationSeconds, clientMediaId, uploadDir: dir, originalName: null, sizeBytes: null },
         (row) => {
           if (!row.reused) {
             // Detached best-effort loop-clip; stores web path in preview_path via dbPath arg
@@ -354,7 +414,7 @@ export async function POST(req: NextRequest) {
 
   if (entryId && process.env.DATABASE_URL) {
     return attachOrFail(
-      { entryId, type: "audio", filePath, thumbnailPath: null, durationSeconds, clientMediaId, uploadDir: dir },
+      { entryId, type: "audio", filePath, thumbnailPath: null, durationSeconds, clientMediaId, uploadDir: dir, originalName: null, sizeBytes: null },
       (row) => ({ id: row.id, filePath: row.filePath, type: "audio" })
     )
   }

@@ -28,7 +28,7 @@ export async function GET(req: NextRequest) {
     const { rows } = await db.query(
       `SELECT m.id, m.entry_id, m.type, m.file_path,
               m.thumbnail_path, m.preview_path, m.duration_seconds,
-              m.client_media_id,
+              m.client_media_id, m.original_name, m.size_bytes,
               e.created_at, j.color AS journal_color
        FROM media m
        JOIN entries e ON e.id = m.entry_id
@@ -48,6 +48,8 @@ export async function GET(req: NextRequest) {
       thumbnailPath: r.thumbnail_path ?? undefined,
       previewPath: r.preview_path ?? undefined,
       durationSeconds: r.duration_seconds ?? undefined,
+      originalName: r.original_name ?? undefined,
+      sizeBytes: r.size_bytes ?? undefined,
       // Lets the overview drop a waiting tile whose upload landed
       // while its outbox record still exists. Bounded small column.
       clientMediaId: r.client_media_id ?? null,

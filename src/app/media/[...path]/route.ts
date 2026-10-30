@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { stat } from "fs/promises"
-import { join, resolve, extname } from "path"
+import { join, resolve, extname, basename } from "path"
 import { isPathSafe } from "@/lib/media-security"
 import { resolveRange, createMediaStream } from "@/lib/media-stream"
 
@@ -19,6 +19,7 @@ const CONTENT_TYPES: Record<string, string> = {
   ".mp3":  "audio/mpeg",
   ".m4a":  "audio/mp4",
   ".aac":  "audio/aac",
+  ".pdf":  "application/pdf",
 }
 
 export async function GET(
@@ -45,7 +46,12 @@ export async function GET(
 
   const ext = extname(filePath).toLowerCase()
   const contentType = CONTENT_TYPES[ext] ?? "application/octet-stream"
-  const supportsRanges = /\.(mp4|mov|m4v|mp3|m4a|aac)$/.test(ext)
+  // PDF: browser viewers fetch large documents in ranges (linearised PDFs).
+  const supportsRanges = /\.(mp4|mov|m4v|mp3|m4a|aac|pdf)$/.test(ext)
+  // PDF opens in the browser's own viewer (new tab) instead of downloading.
+  // The name is the stored <uuid>-original.pdf — never a client string.
+  const dispositionHeaders: Record<string, string> =
+    ext === ".pdf" ? { "Content-Disposition": `inline; filename="${basename(filePath)}"` } : {}
 
   // ── Resolve range (or full-file offsets) ─────────────────────────────────
   const rangeHeader = req.headers.get("range")
@@ -72,6 +78,7 @@ export async function GET(
     return new NextResponse(createMediaStream(filePath, start, end), {
       status: 206,
       headers: {
+        ...dispositionHeaders,
         "Content-Type":   contentType,
         "Content-Range":  `bytes ${start}-${end}/${fileSize}`,
         "Content-Length": String(chunk),
@@ -87,6 +94,7 @@ export async function GET(
   return new NextResponse(createMediaStream(filePath, 0, fileSize - 1), {
     status: 200,
     headers: {
+      ...dispositionHeaders,
       "Content-Type":   contentType,
       "Content-Length": String(fileSize),
       // Nur behaupten, was die Route für diesen Dateityp wirklich tut —

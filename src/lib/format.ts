@@ -96,3 +96,20 @@ export function formatEntryCardDate(
   const dayNum = String(zonedParts(d, tz).day)
   return { weekdayAbbr, dayNum }
 }
+
+/**
+ * Human-readable file size for the PDF attachment row — binary units (1024),
+ * matching the MAX_*_SIZE_MB upload limits so "50 MB" in the hint and
+ * "49,9 MB" on the row agree. Whole KB, one decimal for MB without a trailing
+ * .0; the locale decides the decimal separator (neutral "en" when none is
+ * given). Empty for missing/negative.
+ */
+export function formatBytes(bytes: number | null | undefined, locale: Locale | "en" = "en"): string {
+  if (bytes == null || !Number.isFinite(bytes) || bytes < 0) return ""
+  if (bytes < 1024) return `${Math.round(bytes)} B`
+  const kb = bytes / 1024
+  if (kb < 1024) return `${Math.round(kb)} KB`
+  const mb = Math.round((kb / 1024) * 10) / 10
+  const text = new Intl.NumberFormat(locale, { minimumFractionDigits: 0, maximumFractionDigits: 1 }).format(mb)
+  return `${text} MB`
+}

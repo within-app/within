@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { existsSync } from "fs"
 import { logError, logWarn } from "@/lib/logger"
-import { createExportArchiveStream, buildExportLocationWeather } from "@/lib/export-stream"
+import { createExportArchiveStream, buildExportLocationWeather, exportFolderFor } from "@/lib/export-stream"
 import { safeMediaPath } from "@/lib/media-security"
 
 export async function GET(
@@ -36,7 +36,8 @@ export async function GET(
 
     // ── Load media ──────────────────────────────────────────────────────
     const { rows: mediaRows } = await db.query(
-      `SELECT type, file_path, thumbnail_path, preview_path, order_index, duration_seconds
+      `SELECT type, file_path, thumbnail_path, preview_path, order_index, duration_seconds,
+              original_name, size_bytes
        FROM media WHERE entry_id = $1 ORDER BY order_index`,
       [id]
     )
@@ -72,6 +73,14 @@ export async function GET(
         orderIndex: m.order_index,
         durationSeconds: m.duration_seconds ?? null,
       }))
+    const pdfs = mediaRows
+      .filter((m) => m.type === "pdf")
+      .map((m) => ({
+        filename: m.file_path.split("/").pop() ?? m.file_path,
+        orderIndex: m.order_index,
+        originalName: m.original_name ?? null,
+        sizeBytes: m.size_bytes ?? null,
+      }))
 
     const exportData = {
       version: "1.0",
@@ -90,6 +99,7 @@ export async function GET(
           photos,
           videos,
           audios,
+          pdfs,
         },
       ],
     }
@@ -97,7 +107,7 @@ export async function GET(
     // ── Build media file list ───────────────────────────────────────────
     const mediaFiles: Array<{ absPath: string; zipName: string }> = []
     for (const m of mediaRows) {
-      const folder = m.type === "photo" ? "photos" : m.type === "video" ? "videos" : "audios"
+      const folder = exportFolderFor(m.type)
       let absPath: string
       try {
         absPath = safeMediaPath(process.cwd(), m.file_path)

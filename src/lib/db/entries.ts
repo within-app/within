@@ -17,7 +17,7 @@ export interface ListEntriesParams {
   searchQuery: string | null
   tags: string[] | null
   starred: boolean | null
-  /** "photo" | "audio" | "video" | "any" (Anlage beliebigen Typs) | null (aus). */
+  /** "photo" | "audio" | "video" | "pdf" | "any" (Anlage beliebigen Typs) | null (aus). */
   mediaType: string | null
   page: number
   perPage: number
@@ -34,6 +34,8 @@ interface MediaJsonRow {
   thumbnail_path: string | null
   order_index: number
   duration_seconds: number | null
+  original_name: string | null
+  size_bytes: number | null
 }
 
 interface EntryRow {
@@ -90,7 +92,9 @@ export async function listEntries(
                    'file_path', m.file_path,
                    'thumbnail_path', m.thumbnail_path,
                    'order_index', m.order_index,
-                   'duration_seconds', m.duration_seconds
+                   'duration_seconds', m.duration_seconds,
+                   'original_name', m.original_name,
+                   'size_bytes', m.size_bytes
                  ) ORDER BY m.order_index)
                  FROM media m WHERE m.entry_id = e.id), '[]'::json) AS media_json`
     : ""

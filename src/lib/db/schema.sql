@@ -36,11 +36,15 @@ CREATE TABLE IF NOT EXISTS entries (
 CREATE TABLE IF NOT EXISTS media (
   id               UUID     PRIMARY KEY DEFAULT gen_random_uuid(),
   entry_id         UUID     NOT NULL REFERENCES entries(id) ON DELETE CASCADE,
-  type             TEXT     NOT NULL CHECK (type IN ('photo', 'audio', 'video')),
+  type             TEXT     NOT NULL CHECK (type IN ('photo', 'audio', 'video', 'pdf')),
   file_path        TEXT     NOT NULL,
   thumbnail_path   TEXT,
   order_index      INTEGER  NOT NULL DEFAULT 0,
-  duration_seconds INTEGER
+  duration_seconds INTEGER,
+  -- PDF-Anhänge (2026-10-30): Anzeigename aus Upload/Day-One-Export und
+  -- Dateigröße für die Kachel. Für Fotos/Videos/Audio NULL.
+  original_name    TEXT,
+  size_bytes       INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS entry_tags (
@@ -304,5 +308,38 @@ DO $$ BEGIN
     ALTER TABLE backup_runs DROP CONSTRAINT IF EXISTS backup_runs_status_check;
     ALTER TABLE backup_runs
       ADD CONSTRAINT backup_runs_status_check CHECK (status IN ('ok', 'error', 'skipped'));
+  END IF;
+END $$;
+
+-- ============================================================
+-- 20261030_093000 — media: Typ 'pdf' + original_name/size_bytes
+-- ============================================================
+-- PDF-Anhänge als vierter Medientyp. Die CHECK-Constraint aus dem CREATE
+-- TABLE trägt den automatischen Namen media_type_check; sie wird nur
+-- ersetzt, wenn sie 'pdf' noch nicht kennt. Die zwei Spalten sind rein
+-- additiv (NULL für Bestand). Idempotent.
+
+DO $$ BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'media_type_check'
+      AND conrelid = 'media'::regclass
+      AND pg_get_constraintdef(oid) LIKE '%pdf%'
+  ) THEN
+    ALTER TABLE media DROP CONSTRAINT IF EXISTS media_type_check;
+    ALTER TABLE media
+      ADD CONSTRAINT media_type_check CHECK (type IN ('photo', 'audio', 'video', 'pdf'));
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'media' AND column_name = 'original_name'
+  ) THEN
+    ALTER TABLE media ADD COLUMN original_name TEXT;
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'media' AND column_name = 'size_bytes'
+  ) THEN
+    ALTER TABLE media ADD COLUMN size_bytes INTEGER;
   END IF;
 END $$;

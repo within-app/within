@@ -1,4 +1,4 @@
-export type MediaType = "photo" | "audio" | "video"
+export type MediaType = "photo" | "audio" | "video" | "pdf"
 
 export type WeatherIcon =
   | "sunny"
@@ -24,6 +24,10 @@ export interface Media {
   thumbnailPath?: string
   order: number
   durationSeconds?: number
+  /** PDF only: the file name the user gave it (display + export manifest). */
+  originalName?: string | null
+  /** PDF only: size on disk, for the attachment row. */
+  sizeBytes?: number | null
   /** Client-only. True for a file still waiting in the offline outbox —
    *  `filePath` is then a local object URL, not a server path. The API never sets
    *  this, so it needs no DB column and no sync-protocol field. */
@@ -131,6 +135,9 @@ export interface MediaItem {
   thumbnailPath?: string
   previewPath?: string
   durationSeconds?: number
+  /** PDF only — see `Media`. */
+  originalName?: string | null
+  sizeBytes?: number | null
   createdAt: string
   journalColor: string
   /** The outbox id the file was uploaded under — same contract as on

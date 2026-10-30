@@ -4,10 +4,10 @@
 
 ![Timeline](docs/screenshots/timeline.png)
 
-- **Write** text with Markdown, add photos, videos and voice memos.
+- **Write** text with Markdown, add photos, videos, voice memos and PDF files.
 - **Find** entries again: timeline, calendar, map, tags, favourites, full-text search, and "On this day".
 - **Take it with you:** install it on your phone as an app. Entries and pinned photos stay readable offline, encrypted on the device behind a PIN, and sync back when you are home.
-- **Move in from Day One:** import your existing journal from a Day One export, photos and videos included.
+- **Move in from Day One:** import your existing journal from a Day One export, photos, videos and PDF attachments included.
 - **Sleep well:** a nightly backup with an automatic restore check is part of the setup, not a chore.
 - German, English and French interface.
 
@@ -128,9 +128,9 @@ You can only reach the journal while your phone is in your home Wi-Fi — that i
 
 Within reads Day One's export. In Day One choose *Export → JSON*, which gives you a ZIP. Then in Within open *Settings → Import* and select that ZIP.
 
-- **Expected format:** a ZIP with one or more `.json` files at the top level and media in `photos/`, `videos/` and `audios/` folders.
-- **What comes across:** text, creation and modification dates, tags, favourites, location and weather data, the original entry ID, and all photos, videos and audio.
-- **What does not:** PDF attachments. Day One can attach them, Within does not import them — keep those files separately.
+- **Expected format:** a ZIP with one or more `.json` files at the top level and media in `photos/`, `videos/`, `audios/` and `pdfs/` folders.
+- **What comes across:** text, creation and modification dates, tags, favourites, location and weather data, the original entry ID, and all photos, videos and PDF attachments (with their file names).
+- **What does not:** audio memos from Day One exports are not imported yet.
 - **Photos are checked like uploads:** the import only takes JPEG, PNG, WebP and GIF — Within looks at the file itself, not its name. Anything else (HEIC/AVIF, TIFF, …) is skipped and listed under the import result so you can convert and add those pictures by hand. On a Mac: select the HEIC files in Finder → right-click → *Quick Actions* → *Convert Image* → JPEG.
 
 Large journals are imported in batches; the page shows progress and you can keep the tab open in the background.
@@ -142,7 +142,8 @@ Large journals are imported in batches; the page shows progress and you can keep
 - **PIN forgotten?** On the lock screen tap *Forgot PIN?* → *Delete local data & log in again*. That only deletes the encrypted **copy on that device** — your entries on the server are untouched. Log in again and pick a new PIN.
 - **Offline.** Entries you write without a connection are queued on the device and sent when you are back home. Photos you pin are kept offline; the map needs a connection.
 - **Export.** *Settings → Export* downloads a ZIP with `export.json` and all media — the same shape as the import, so you can move to another installation or just keep a copy.
-- **Sizes.** Photos up to 20 MB, videos up to 100 MB and audio up to 50 MB per file by default. On a phone with little memory, turn on *Settings → Uploads → Shrink large photos before uploading*.
+- **PDF attachments.** A PDF shows up below the entry text with its name and size. *Open* hands it to your browser's own PDF viewer in a new tab, *Download* saves the file. Within stores the file as it is and never renders it on the server; the only check on upload is that the file really starts like a PDF.
+- **Sizes.** Photos up to 20 MB, videos up to 100 MB, audio up to 50 MB and PDF files up to 50 MB per file by default. On a phone with little memory, turn on *Settings → Uploads → Shrink large photos before uploading*.
 - **Search** uses German word stemming; searching in other languages works on exact words.
 
 ## Backups

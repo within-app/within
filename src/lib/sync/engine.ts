@@ -464,6 +464,8 @@ export function createSyncEngine(
       // The outbox id doubles as idempotency key — a retry after a lost
       // response finds the already-inserted row instead of duplicating it.
       const params = new URLSearchParams({ entryId: item.entryId, clientMediaId: item.id })
+      // PDFs: the display name travels as a query parameter (raw body has none).
+      if (item.type === "pdf" && item.fileName) params.set("fileName", item.fileName)
 
       let ok = false
       let status = 0

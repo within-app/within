@@ -159,7 +159,11 @@ export function EntryEditor({ initialEntry, journals, defaultJournalId, defaultT
       tags: tags.map((t) => t.name),
       photos: photos
         .filter((p) => !p.uploading && !p.error && p.filePath)
-        .map((p) => ({ id: p.dbId, filePath: p.filePath!, thumbnailPath: p.thumbnailPath, type: p.type })),
+        .map((p) => ({
+          id: p.dbId, filePath: p.filePath!, thumbnailPath: p.thumbnailPath, type: p.type,
+          // PDF display fields for the autosave path (upload before the entry existed)
+          originalName: p.originalName, sizeBytes: p.sizeBytes,
+        })),
       locationName: locationName.trim() || null,
       locationLat: parsedLat !== null && !isNaN(parsedLat) ? parsedLat : null,
       locationLng: parsedLng !== null && !isNaN(parsedLng) ? parsedLng : null,

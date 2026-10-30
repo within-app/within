@@ -19,6 +19,24 @@ describe("cleanText", () => {
     expect(cleanText("photo: ![](dayone-moment://aabbcc001122334455)")).toBe("photo:")
   })
 
+  // Day One schreibt für PDF-, Audio- und Video-Anhänge Platzhalter mit
+  // EINEM Slash und einem Pfadsegment: dayone-moment:/pdfAttachment/<ID>.
+  // Vor den PDF-Anhängen (2026-10-30) blieb der Platzhalter als Text stehen.
+  it("strips a pdfAttachment placeholder (single slash + segment)", () => {
+    expect(cleanText("Rechnung: ![](dayone-moment:/pdfAttachment/AABBCC001122334455) anbei")).toBe("Rechnung:  anbei")
+  })
+
+  it("strips audio and video placeholders of the same shape", () => {
+    expect(cleanText("![](dayone-moment:/audio/AABBCC001122334455) Memo")).toBe("Memo")
+    expect(cleanText("Clip ![](dayone-moment:/video/aabbcc001122334455)")).toBe("Clip")
+  })
+
+  it("leaves ordinary markdown images and links untouched", () => {
+    expect(cleanText("![alt](https://example.test/a.png) [doc](dayone-moment-not-a-ref)")).toBe(
+      "![alt](https://example.test/a.png) [doc](dayone-moment-not-a-ref)"
+    )
+  })
+
   it("strips multiple dayone-moment refs", () => {
     expect(
       cleanText("A ![](dayone-moment://AAA111) B ![](dayone-moment://BBB222) C")

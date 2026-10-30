@@ -328,3 +328,21 @@ describe("foldPendingIntoRows", () => {
     expect(rows[0]).toBe(input[0])
   })
 })
+
+describe("pending PDF rows (2026-10-30)", () => {
+  it("toPendingMedia carries the outbox file name and size for a waiting PDF only", async () => {
+    const { toPendingMedia, toPendingMediaItem } = await import("@/lib/sync/pending-media")
+    const base = {
+      id: "ob-1", entryId: "e-1", blob: new Blob(["%PDF-"]), fileName: "Synth.pdf",
+      mimeType: "application/pdf", size: 1234, queuedAt: "2024-05-01T10:00:00.000Z", attempts: 0,
+    }
+    const pdf = toPendingMedia({ ...base, type: "pdf" }, "blob:x", 0)
+    expect(pdf.originalName).toBe("Synth.pdf")
+    expect(pdf.sizeBytes).toBe(1234)
+    const item = toPendingMediaItem({ ...base, type: "pdf" }, "blob:x")
+    expect(item.originalName).toBe("Synth.pdf")
+    expect(item.sizeBytes).toBe(1234)
+    const photo = toPendingMedia({ ...base, type: "photo", fileName: "a.jpg", mimeType: "image/jpeg" }, "blob:y", 0)
+    expect("originalName" in photo).toBe(false)
+  })
+})

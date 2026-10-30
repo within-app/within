@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useMemo, useRef } from "react"
 import { format } from "date-fns"
-import { CloudAlert, CloudOff, ImageOff, Loader2, Play, Music, Video } from "lucide-react"
+import { CloudAlert, CloudOff, FileText, ImageOff, Loader2, Play, Music, Video } from "lucide-react"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { cn } from "@/lib/utils"
 import { formatDuration } from "@/lib/format"
@@ -272,6 +272,15 @@ export function MediaGridView({
                 />
               )
             }
+            if (item.type === "pdf") {
+              return (
+                <PdfTile
+                  key={item.id}
+                  item={item}
+                  onClick={() => onEntrySelect(item.entryId)}
+                />
+              )
+            }
             return (
               <PhotoTile
                 key={item.id}
@@ -436,6 +445,56 @@ function VideoTile({ item, onClick }: { item: MediaItem; onClick: () => void }) 
 
       {/* Date label — bottom-left on hover */}
       <span className="absolute bottom-1.5 left-2 text-[10px] font-medium text-white/90 opacity-0 group-hover:opacity-100 transition-opacity duration-slow leading-none drop-shadow-sm">
+        {dateLabel}
+      </span>
+    </button>
+  )
+}
+
+/**
+ * PDF attachment in the overview (2026-10-30): same shell as AudioTile —
+ * document icon, "PDF", the display name, the date. Clicking opens the entry;
+ * the file itself opens from the entry's attachment row.
+ */
+export function PdfTile({ item, onClick }: { item: MediaItem; onClick: () => void }) {
+  const { messages, locale } = useI18n()
+  const dateLabel = format(toZonedDate(new Date(item.createdAt)), messages.date.dayMonthShort, { locale: getDateFnsLocale(locale) })
+  const name = item.originalName ?? messages.detail.pdf.fallbackName
+
+  return (
+    <button
+      onClick={onClick}
+      className={cn(
+        "relative group flex flex-col items-center justify-center gap-2 overflow-hidden cursor-pointer",
+        "bg-muted/30 border border-border/40",
+        "hover:bg-muted/60 transition-colors duration-200",
+        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-inset"
+      )}
+      style={{ aspectRatio: "1 / 1" }}
+      aria-label={messages.media.pdfAlt(dateLabel, name)}
+    >
+      {/* Journal color bar — top edge */}
+      <div
+        className="absolute top-0 left-0 right-0 h-[3px]"
+        style={{ backgroundColor: item.journalColor }}
+      />
+
+      <div className="rounded-full bg-primary/10 group-hover:bg-primary/20 transition-colors p-4">
+        <FileText className="h-6 w-6 text-primary" />
+      </div>
+
+      {/* Format label */}
+      <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide">
+        PDF
+      </span>
+
+      {/* Display name — truncated, full name on hover */}
+      <span className="max-w-[90%] truncate px-2 text-[10px] text-muted-foreground/70" title={name}>
+        {name}
+      </span>
+
+      {/* Date label — bottom */}
+      <span className="absolute bottom-1.5 text-[10px] font-medium text-muted-foreground/60 leading-none">
         {dateLabel}
       </span>
     </button>

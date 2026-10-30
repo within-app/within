@@ -13,6 +13,7 @@ import { MarkdownContent } from "@/components/detail/markdown-content"
 import { PhotoGallery } from "@/components/detail/photo-gallery"
 import { AudioPlayer } from "@/components/detail/audio-player"
 import { VideoPlayer } from "@/components/detail/video-player"
+import { PdfAttachment } from "@/components/detail/pdf-attachment"
 import { EntryMetadata } from "@/components/detail/entry-metadata"
 import { ConflictCopies } from "@/components/detail/conflict-copies"
 import { DeleteDialog } from "@/components/editor/delete-dialog"
@@ -59,11 +60,13 @@ export function orderDetailMedia(media: Media[]): {
   photos: Media[]
   videos: Media[]
   audio: Media[]
+  pdfs: Media[]
 } {
   return {
     photos: media.filter((m) => m.type === "photo"),
     videos: media.filter((m) => m.type === "video"),
     audio: media.filter((m) => m.type === "audio"),
+    pdfs: media.filter((m) => m.type === "pdf"),
   }
 }
 
@@ -283,9 +286,13 @@ export function EntryDetail({ entryId, onBack, onEdit, reloadNonce = 0, onDelete
   // Offline + ungepinnt bleiben nur die noch wartenden lokalen Dateien übrig;
   // die Abschnitte unten rendern ohnehin nur, wenn ihre
   // Liste nicht leer ist — ohne Wartende sieht die Ansicht aus wie bisher.
-  const { photos, videos: videoFiles, audio: audioFiles } = orderDetailMedia(
+  const { photos, videos: videoFiles, audio: audioFiles, pdfs } = orderDetailMedia(
     visibleEntryMedia(entry.media, online, isPinned)
   )
+  // PDFs are never cached for offline (pin rule = photos), so a pinned entry
+  // offline would show a row whose "Open" yields the SW placeholder. Hide
+  // server PDFs offline; files still waiting in the outbox stay visible.
+  const pdfFiles = online ? pdfs : pdfs.filter((p) => p.pending)
 
   const { title, body } = extractTitle(entry.text)
 
@@ -395,7 +402,7 @@ export function EntryDetail({ entryId, onBack, onEdit, reloadNonce = 0, onDelete
             {body && <MarkdownContent content={body} />}
             {!title && entry.text && <MarkdownContent content={entry.text} />}
 
-            {/* All media below the text — photos, then videos, then audio.
+            {/* All media below the text — photos, then videos, then audio, then PDFs.
                 No hero image above the title any more.
                 Offline + ungepinnt: nur Text, keine Kacheln, kein Hinweis
                 — ausgenommen Dateien, die noch auf
@@ -417,6 +424,13 @@ export function EntryDetail({ entryId, onBack, onEdit, reloadNonce = 0, onDelete
             {audioFiles.map((audio) => (
               <div key={audio.id} className="mt-6">
                 <AudioPlayer media={audio} />
+              </div>
+            ))}
+
+            {/* PDF attachments — opened in the browser's own viewer, never rendered here */}
+            {pdfFiles.map((pdf) => (
+              <div key={pdf.id} className="mt-6">
+                <PdfAttachment media={pdf} />
               </div>
             ))}
 

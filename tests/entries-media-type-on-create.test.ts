@@ -15,7 +15,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import { NextRequest } from "next/server"
-import { CreateEntrySchema } from "../src/lib/schemas/entry.schema"
+import { CreateEntrySchema, UpdateEntrySchema, EntryQuerySchema } from "../src/lib/schemas/entry.schema"
 
 vi.mock("@/lib/db", () => ({
   db: { query: vi.fn(), connect: vi.fn() },
@@ -32,6 +32,61 @@ describe("CreateEntrySchema — photos[].type", () => {
     })
     expect(result.success).toBe(true)
     if (result.success) expect(result.data.photos[0].type).toBe("video")
+  })
+
+  it("accepts type 'pdf' together with the display fields originalName and sizeBytes", () => {
+    const result = CreateEntrySchema.safeParse({
+      journalId: JOURNAL_ID,
+      photos: [{ filePath: "/media/x/x-original.pdf", type: "pdf", originalName: "Rechnung.pdf", sizeBytes: 819175 }],
+    })
+    expect(result.success).toBe(true)
+    if (result.success) {
+      expect(result.data.photos[0].type).toBe("pdf")
+      expect(result.data.photos[0].originalName).toBe("Rechnung.pdf")
+      expect(result.data.photos[0].sizeBytes).toBe(819175)
+    }
+  })
+
+  it("rejects an over-long originalName and a negative sizeBytes", () => {
+    expect(CreateEntrySchema.safeParse({
+      journalId: JOURNAL_ID,
+      photos: [{ filePath: "/media/x/x.pdf", type: "pdf", originalName: "x".repeat(201) }],
+    }).success).toBe(false)
+    expect(CreateEntrySchema.safeParse({
+      journalId: JOURNAL_ID,
+      photos: [{ filePath: "/media/x/x.pdf", type: "pdf", sizeBytes: -1 }],
+    }).success).toBe(false)
+  })
+
+  it("rejects an originalName with path separators or control characters (same invariant as the upload)", () => {
+    for (const bad of ["../../x", "a/b.pdf", "C:\\x.pdf", "a\u0000b.pdf", "x\r\nInjected: 1", "  ", ".."]) {
+      const result = CreateEntrySchema.safeParse({
+        journalId: JOURNAL_ID,
+        photos: [{ filePath: "/media/x/x.pdf", type: "pdf", originalName: bad }],
+      })
+      expect(result.success, `should reject ${JSON.stringify(bad)}`).toBe(false)
+    }
+    const update = UpdateEntrySchema.safeParse({
+      journalId: JOURNAL_ID, createdAt: "2024-06-01T08:00:00.000Z",
+      photos: [{ filePath: "/media/x/x.pdf", type: "pdf", originalName: "../x.pdf" }],
+    })
+    expect(update.success).toBe(false)
+  })
+
+  it("rejects sizeBytes beyond the INTEGER column (would be a 500 from Postgres)", () => {
+    expect(CreateEntrySchema.safeParse({
+      journalId: JOURNAL_ID,
+      photos: [{ filePath: "/media/x/x.pdf", type: "pdf", sizeBytes: 2_147_483_648 }],
+    }).success).toBe(false)
+    expect(CreateEntrySchema.safeParse({
+      journalId: JOURNAL_ID,
+      photos: [{ filePath: "/media/x/x.pdf", type: "pdf", sizeBytes: 2_147_483_647 }],
+    }).success).toBe(true)
+  })
+
+  it("timeline filter accepts mediaType=pdf", () => {
+    expect(EntryQuerySchema.safeParse({ mediaType: "pdf" }).success).toBe(true)
+    expect(EntryQuerySchema.safeParse({ mediaType: "document" }).success).toBe(false)
   })
 
   it("rejects an unknown type", () => {
@@ -89,6 +144,18 @@ describe("POST /api/entries — media type binding", () => {
       { filePath: "/media/c/c-original.m4a", type: "audio" },
     ])
     expect(media.params).toContainEqual(["photo", "video", "audio"])
+  })
+
+  it("binds original_name and size_bytes per medium (null for media without them)", async () => {
+    const media = await postWithPhotos([
+      { filePath: "/media/a/a.jpg", thumbnailPath: "/media/a/a-thumb.webp", type: "photo" },
+      { filePath: "/media/d/d-original.pdf", type: "pdf", originalName: "Vertrag.pdf", sizeBytes: 4096 },
+    ])
+    expect(media.sql).toMatch(/original_name/)
+    expect(media.sql).toMatch(/size_bytes/)
+    expect(media.params).toContainEqual(["photo", "pdf"])
+    expect(media.params).toContainEqual([null, "Vertrag.pdf"])
+    expect(media.params).toContainEqual([null, 4096])
   })
 
   it("defaults to 'photo' when the payload carries no type (backwards compatible)", async () => {

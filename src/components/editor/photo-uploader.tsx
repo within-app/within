@@ -1,7 +1,7 @@
 "use client"
 
 import { useRef, useState, useEffect } from "react"
-import { ImagePlus, Film, Music, X, ChevronUp, ChevronDown, Loader2, CloudOff } from "lucide-react"
+import { ImagePlus, Film, Music, FileText, X, ChevronUp, ChevronDown, Loader2, CloudOff } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { realIDBAdapter } from "@/lib/sync/idb"
 import { isEntryQueuedLocally } from "@/lib/sync/queue-status"
@@ -18,6 +18,7 @@ import type { Messages } from "@/lib/i18n"
 import {
   ALLOWED_VIDEO_MIMES,
   ALLOWED_AUDIO_MIMES,
+  ALLOWED_PDF_MIMES,
   getMaxMBForType,
   type UploadMediaType,
 } from "@/lib/upload-security"
@@ -29,7 +30,10 @@ export interface UploadedPhoto {
   dbId?: string
   uploading?: boolean
   error?: string
-  type?: "photo" | "video" | "audio"
+  type?: UploadMediaType
+  /** PDF only: display name and size, as the server stored them. */
+  originalName?: string | null
+  sizeBytes?: number | null
   /** Object URL of a file queued offline — the preview source until upload. */
   localUrl?: string
   /** True while the file sits in the offline outbox. */
@@ -65,6 +69,8 @@ function toQueuedPhoto(
     tempId: item.id,
     filePath: "",
     type: item.type,
+    originalName: item.type === "pdf" ? item.fileName : undefined,
+    sizeBytes: item.type === "pdf" ? item.size : undefined,
     localUrl,
     queuedOffline: true,
     // Only surface an error once the file has stopped retrying — a normal wait
@@ -81,13 +87,14 @@ function toQueuedPhoto(
 // die Server-Prüfung.
 const ALLOWED_IMAGE_MIMES = ["image/jpeg", "image/png", "image/webp", "image/gif"]
 const ACCEPT = [
-  ...ALLOWED_IMAGE_MIMES, ...ALLOWED_VIDEO_MIMES, ...ALLOWED_AUDIO_MIMES,
-  ".jpg", ".jpeg", ".png", ".webp", ".gif", ".mp4", ".m4v", ".mov", ".mp3", ".m4a", ".aac",
+  ...ALLOWED_IMAGE_MIMES, ...ALLOWED_VIDEO_MIMES, ...ALLOWED_AUDIO_MIMES, ...ALLOWED_PDF_MIMES,
+  ".jpg", ".jpeg", ".png", ".webp", ".gif", ".mp4", ".m4v", ".mov", ".mp3", ".m4a", ".aac", ".pdf",
 ].join(",")
 
 function detectType(mime: string): UploadMediaType | null {
   if ((ALLOWED_VIDEO_MIMES as readonly string[]).includes(mime)) return "video"
   if ((ALLOWED_AUDIO_MIMES as readonly string[]).includes(mime)) return "audio"
+  if ((ALLOWED_PDF_MIMES as readonly string[]).includes(mime)) return "pdf"
   if (ALLOWED_IMAGE_MIMES.includes(mime)) return "photo"
   return null
 }
@@ -191,7 +198,14 @@ export function PhotoUploader({ initialPhotos = [], entryId, ensureEntryId, onCh
       return
     }
 
-    const url = entryId ? `/api/upload?entryId=${entryId}&clientMediaId=${clientMediaId}` : "/api/upload"
+    const params = new URLSearchParams()
+    if (entryId) {
+      params.set("entryId", entryId)
+      params.set("clientMediaId", clientMediaId)
+    }
+    // The raw body carries no file name — PDFs send it for the attachment row.
+    if (mediaType === "pdf" && file.name) params.set("fileName", file.name)
+    const url = params.size > 0 ? `/api/upload?${params}` : "/api/upload"
 
     try {
       // Raw body, no multipart: the server streams it straight to disk.
@@ -213,7 +227,9 @@ export function PhotoUploader({ initialPhotos = [], entryId, ensureEntryId, onCh
         filePath: string
         thumbnailPath?: string
         id?: string
-        type?: "photo" | "video" | "audio"
+        type?: UploadMediaType
+        originalName?: string | null
+        sizeBytes?: number | null
       }
       setPhotos((prev) =>
         prev.map((p) =>
@@ -224,6 +240,8 @@ export function PhotoUploader({ initialPhotos = [], entryId, ensureEntryId, onCh
                 thumbnailPath: data.thumbnailPath,
                 dbId: data.id,
                 type: data.type ?? mediaType,
+                originalName: data.originalName,
+                sizeBytes: data.sizeBytes,
               }
             : p
         )
@@ -240,7 +258,7 @@ export function PhotoUploader({ initialPhotos = [], entryId, ensureEntryId, onCh
   async function queueOffline(
     file: File,
     tempId: string,
-    mediaType: "photo" | "video" | "audio",
+    mediaType: UploadMediaType,
     clientMediaId: string
   ) {
     function fail(message: string) {
@@ -407,6 +425,16 @@ export function PhotoUploader({ initialPhotos = [], entryId, ensureEntryId, onCh
                 <div className="flex flex-col items-center justify-center h-full gap-1 text-muted-foreground">
                   <Film className="h-8 w-8" />
                   <span className="text-xs">{uploaderMessages.videoLabel}</span>
+                </div>
+              ) : photo.type === "pdf" ? (
+                <div className="flex flex-col items-center justify-center h-full gap-1 px-2 text-muted-foreground">
+                  <FileText className="h-8 w-8" />
+                  <span className="text-xs">{uploaderMessages.pdfLabel}</span>
+                  {photo.originalName && (
+                    <span className="max-w-full truncate text-[10px] text-muted-foreground/70" title={photo.originalName}>
+                      {photo.originalName}
+                    </span>
+                  )}
                 </div>
               ) : (
                 <div className="flex flex-col items-center justify-center h-full gap-1 text-muted-foreground">

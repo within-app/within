@@ -49,15 +49,17 @@ export async function POST(req: NextRequest) {
     // Batch-insert photos
     if (photos.length > 0) {
       await client.query(
-        `INSERT INTO media (entry_id, type, file_path, thumbnail_path, order_index)
-         SELECT $1::uuid, ty, f, t, o
-         FROM UNNEST($2::text[], $3::text[], $4::text[], $5::int[]) AS u(ty, f, t, o)`,
+        `INSERT INTO media (entry_id, type, file_path, thumbnail_path, order_index, original_name, size_bytes)
+         SELECT $1::uuid, ty, f, t, o, n, s
+         FROM UNNEST($2::text[], $3::text[], $4::text[], $5::int[], $6::text[], $7::int[]) AS u(ty, f, t, o, n, s)`,
         [
           entryId,
           photos.map(p => p.type ?? "photo"),
           photos.map(p => p.filePath),
           photos.map(p => p.thumbnailPath ?? null),
           photos.map((_, i) => i),
+          photos.map(p => p.originalName ?? null),
+          photos.map(p => p.sizeBytes ?? null),
         ]
       )
     }
@@ -155,6 +157,8 @@ export async function GET(req: NextRequest) {
         thumbnailPath: m.thumbnail_path ?? undefined,
         order: m.order_index,
         durationSeconds: m.duration_seconds ?? undefined,
+        originalName: m.original_name ?? undefined,
+        sizeBytes: m.size_bytes ?? undefined,
       }))
       const fullEntry: FullTimelineEntry = { ...entry, text: row.text ?? "", media }
       dateMap.get(key)!.push(full ? fullEntry : entry)

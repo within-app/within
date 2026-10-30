@@ -21,7 +21,7 @@ const de = {
   },
   api: {
     fileTooLarge: (maxMB: number, kind: string) => {
-      const label = kind === "video" ? "Videos" : kind === "audio" ? "Audio" : "Bilder"
+      const label = kind === "video" ? "Videos" : kind === "audio" ? "Audio" : kind === "pdf" ? "PDFs" : "Bilder"
       return `Datei zu groß (max. ${maxMB} MB für ${label})`
     },
     rateLimitedLogin: (seconds: number) => `Zu viele Versuche, bitte warte ${seconds} Sekunden`,
@@ -93,7 +93,7 @@ const en: SectionMessages = {
   },
   api: {
     fileTooLarge: (maxMB: number, kind: string) => {
-      const label = kind === "video" ? "videos" : kind === "audio" ? "audio" : "photos"
+      const label = kind === "video" ? "videos" : kind === "audio" ? "audio" : kind === "pdf" ? "PDFs" : "photos"
       return `File too large (max. ${maxMB} MB for ${label})`
     },
     rateLimitedLogin: (seconds: number) => `Too many attempts, please wait ${seconds} seconds`,
@@ -165,7 +165,7 @@ const fr: SectionMessages = {
   },
   api: {
     fileTooLarge: (maxMB: number, kind: string) => {
-      const label = kind === "video" ? "les vidéos" : kind === "audio" ? "l'audio" : "les photos"
+      const label = kind === "video" ? "les vidéos" : kind === "audio" ? "l'audio" : kind === "pdf" ? "les PDF" : "les photos"
       return `Fichier trop volumineux (max. ${maxMB} Mo pour ${label})`
     },
     rateLimitedLogin: (seconds: number) => `Trop de tentatives, attends ${seconds} secondes`,

@@ -38,6 +38,13 @@ const de = {
   video: {
     unavailable: "Video nicht verfügbar",
   },
+  pdf: {
+    fallbackName: "PDF",
+    open: "Öffnen",
+    openAria: (name: string) => `${name} in neuem Tab öffnen`,
+    download: "Herunterladen",
+    downloadAria: (name: string) => `${name} herunterladen`,
+  },
 }
 
 type SectionMessages = typeof de
@@ -80,6 +87,13 @@ const en: SectionMessages = {
   video: {
     unavailable: "Video unavailable",
   },
+  pdf: {
+    fallbackName: "PDF",
+    open: "Open",
+    openAria: (name: string) => `Open ${name} in a new tab`,
+    download: "Download",
+    downloadAria: (name: string) => `Download ${name}`,
+  },
 }
 
 const fr: SectionMessages = {
@@ -119,6 +133,13 @@ const fr: SectionMessages = {
   },
   video: {
     unavailable: "Vidéo indisponible",
+  },
+  pdf: {
+    fallbackName: "PDF",
+    open: "Ouvrir",
+    openAria: (name: string) => `Ouvrir ${name} dans un nouvel onglet`,
+    download: "Télécharger",
+    downloadAria: (name: string) => `Télécharger ${name}`,
   },
 }
 

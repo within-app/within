@@ -10,6 +10,7 @@ import { MarkdownContent } from "@/components/detail/markdown-content"
 import { PhotoGallery } from "@/components/detail/photo-gallery"
 import { AudioPlayer } from "@/components/detail/audio-player"
 import { VideoPlayer } from "@/components/detail/video-player"
+import { PdfAttachment } from "@/components/detail/pdf-attachment"
 import { orderDetailMedia } from "@/components/detail/entry-detail"
 import { formatEntryDate, formatEntryTime, extractTitle } from "@/lib/format"
 import type { FullTimelineEntry } from "@/types/journal"
@@ -334,7 +335,7 @@ export function OnThisDayEntry({
 }) {
   const { messages, locale } = useI18n()
   const { title, body } = extractTitle(entry.text)
-  const { photos, videos, audio } = orderDetailMedia(entry.media)
+  const { photos, videos, audio, pdfs } = orderDetailMedia(entry.media)
 
   return (
     <section className="px-6 sm:px-8">
@@ -398,6 +399,11 @@ export function OnThisDayEntry({
         {audio.map((audioFile) => (
           <div key={audioFile.id} className="mt-6">
             <AudioPlayer media={audioFile} />
+          </div>
+        ))}
+        {pdfs.map((pdf) => (
+          <div key={pdf.id} className="mt-6">
+            <PdfAttachment media={pdf} />
           </div>
         ))}
       </article>

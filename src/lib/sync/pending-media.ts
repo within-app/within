@@ -52,6 +52,9 @@ export function toPendingMedia(item: OutboxMedia, previewUrl: string, order: num
     order,
     pending: true,
     clientMediaId: item.id,
+    // A waiting PDF keeps its file name and size — the attachment row shows
+    // them instead of the bare "PDF" fallback (the outbox knows both).
+    ...(item.type === "pdf" && { originalName: item.fileName, sizeBytes: item.size }),
     ...(stuck && { uploadStuck: true, uploadError: item.lastError }),
   }
 }
@@ -148,6 +151,7 @@ export function toPendingMediaItem(
     journalColor: "",
     pending: true,
     clientMediaId: item.id,
+    ...(item.type === "pdf" && { originalName: item.fileName, sizeBytes: item.size }),
     ...(stuck && { uploadStuck: true, uploadError: item.lastError }),
   }
 }

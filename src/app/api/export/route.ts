@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { existsSync } from "fs"
 import { logError, logWarn } from "@/lib/logger"
-import { createExportArchiveStream, buildExportLocationWeather } from "@/lib/export-stream"
+import { createExportArchiveStream, buildExportLocationWeather, exportFolderFor } from "@/lib/export-stream"
 import { safeMediaPath } from "@/lib/media-security"
 import { dateKey } from "@/lib/timezone"
 
@@ -42,11 +42,13 @@ export async function GET(req: NextRequest) {
     let mediaRows: Array<{
       id: string; entry_id: string; type: string;
       file_path: string; thumbnail_path: string | null; preview_path: string | null;
-      order_index: number; duration_seconds: number | null
+      order_index: number; duration_seconds: number | null;
+      original_name: string | null; size_bytes: number | null
     }> = []
     if (entryIds.length > 0) {
       const { rows } = await db.query(
-        `SELECT id, entry_id, type, file_path, thumbnail_path, preview_path, order_index, duration_seconds
+        `SELECT id, entry_id, type, file_path, thumbnail_path, preview_path, order_index, duration_seconds,
+                original_name, size_bytes
          FROM media
          WHERE entry_id = ANY($1::uuid[])
          ORDER BY entry_id, order_index`,
@@ -110,6 +112,16 @@ export async function GET(req: NextRequest) {
             orderIndex: m.order_index,
             durationSeconds: m.duration_seconds ?? null,
           }))
+        // PDF attachments: name and size travel in the manifest so a
+        // re-import shows the same row as before (the file itself is <uuid>-original.pdf).
+        const pdfs = entryMedia
+          .filter((m) => m.type === "pdf")
+          .map((m) => ({
+            filename: m.file_path.split("/").pop() ?? m.file_path,
+            orderIndex: m.order_index,
+            originalName: m.original_name ?? null,
+            sizeBytes: m.size_bytes ?? null,
+          }))
         return {
           id: e.id,
           journalId: e.journal_id,
@@ -122,6 +134,7 @@ export async function GET(req: NextRequest) {
           photos,
           videos,
           audios,
+          pdfs,
         }
       }),
     }
@@ -131,7 +144,7 @@ export async function GET(req: NextRequest) {
     for (const e of entryRows) {
       const entryMedia = mediaByEntry.get(e.id) ?? []
       for (const m of entryMedia) {
-        const folder = m.type === "photo" ? "photos" : m.type === "video" ? "videos" : "audios"
+        const folder = exportFolderFor(m.type)
         let absPath: string
         try {
           absPath = safeMediaPath(process.cwd(), m.file_path)
