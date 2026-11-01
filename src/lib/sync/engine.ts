@@ -97,7 +97,10 @@ export function createSyncEngine(
   /** Pull-Fehler dürfen nicht wie Erfolg aussehen — failed landet im
    *  SyncResult und im Sync-Badge. Der öffentliche pull() behält seine
    *  Zahl-Signatur für Bestandsaufrufer. */
-  async function pullInternal(since: string | null): Promise<{ written: number; failed: boolean }> {
+  async function pullInternal(
+    since: string | null,
+    opts: { dropMediaCache?: boolean } = {}
+  ): Promise<{ written: number; failed: boolean }> {
     const effectiveSince = since ?? "1970-01-01T00:00:00.000Z"
     let cursor: string | null = null
     let totalWritten = 0
@@ -141,8 +144,11 @@ export function createSyncEngine(
           // overwriting the local copy — read-time stamp comparison is wrong
           // here, because an offline edit legitimately moves the local
           // updatedAt ahead without touching any media.
+          // Nach einem Wechsel der Datenbestand-Kennung gibt es kein `existing`
+          // mehr (Store geleert) — die gecachte Medienliste muss trotzdem weg,
+          // sonst zeigt die Offline-Ansicht Fotos, die der neue Bestand nicht hat.
           const existing = await idb.getEntry(entry.id)
-          if (existing && existing.updatedAt !== entry.updatedAt) {
+          if (opts.dropMediaCache || (existing && existing.updatedAt !== entry.updatedAt)) {
             await idb.deleteMeta?.(entryMediaMetaKey(entry.id))
           }
           await idb.putEntry(entry)
@@ -548,7 +554,7 @@ export function createSyncEngine(
     // hat den Handy-Browser abgeschossen (Access-Log-Befund). Die
     // Probe ist ein billiger GET; Netzwerkfehler (status 0) blockieren den
     // Offline-Pfad nicht.
-    const probe = await fetchJson<unknown>("/api/settings")
+    const probe = await fetchJson<{ datasetId?: unknown }>("/api/settings")
     if (probe.status === 401 || probe.status === 403) {
       return {
         pulled: 0, pushed: 0, conflicts: 0, errors: 0,
@@ -559,24 +565,52 @@ export function createSyncEngine(
     const storedVersion = await idb.getMeta("schemaVersion")
     const needsBackfill = storedVersion !== SCHEMA_VERSION
 
-    // When the schema version hasn't been stamped (fresh install or post-upgrade),
-    // pass null so pull() fetches from epoch — backfilling all existing entries.
-    const lastSync = needsBackfill ? null : await idb.getMeta("lastSync")
-    const lastSyncBeforePull = needsBackfill ? await idb.getMeta("lastSync") : null
+    // Datenbestand-Kennung: der Server stempelt seinen Bestand (app_settings.
+    // dataset_id) und wechselt die Kennung bei Restore, Neuaufsetzen und
+    // Journal-Löschung — Fälle, die der Delta-Sync nie sieht. Weicht die
+    // Kennung von der gemerkten ab, wird der lokale Entries-Bestand verworfen
+    // und alles ab Epoche gezogen; der Push bleibt davor, damit offline
+    // Geschriebenes nicht verloren geht. Ein Server ohne Kennung (älterer
+    // Stand) ändert nichts; beim ersten Mal wird nur gemerkt, nicht verworfen.
+    const serverDatasetId =
+      typeof probe.data?.datasetId === "string" && probe.data.datasetId ? probe.data.datasetId : null
+    const localDatasetId = serverDatasetId ? await idb.getMeta("datasetId") : null
+    const datasetChanged = serverDatasetId !== null && localDatasetId !== null && localDatasetId !== serverDatasetId
+    if (serverDatasetId && localDatasetId === null) {
+      await idb.setMeta("datasetId", serverDatasetId)
+    }
+
+    const fullPull = needsBackfill || datasetChanged
+    // When the schema version hasn't been stamped (fresh install or post-upgrade)
+    // or the dataset changed, pass null so pull() fetches from epoch.
+    const lastSync = fullPull ? null : await idb.getMeta("lastSync")
+    const lastSyncBeforePull = fullPull ? await idb.getMeta("lastSync") : null
 
     const pushResult = await push()
     // Pins + media only after push — the entry has to exist server-side first.
     await flushPinOps()
     const media = await flushMedia()
-    const pullResult = await pullInternal(lastSync)
+    if (datasetChanged) {
+      // Nach dem Push, vor dem Pull: ein Full-Pull upsertet nur — Einträge,
+      // die der neue Bestand nicht kennt, blieben sonst stehen.
+      await idb.clearEntries?.()
+      // Was noch in der Queue wartet (Push transient gescheitert), bleibt
+      // sichtbar: die Ansichten lesen den Store entries, nicht die Queue —
+      // den Spiegel aus der Queue wiederherstellen (wie repairQueue).
+      for (const edit of await idb.listQueue()) {
+        if (edit.operation !== "delete" && edit.payload) await idb.putEntry(edit.payload)
+      }
+    }
+    const pullResult = await pullInternal(lastSync, { dropMediaCache: datasetChanged })
     const pulled = pullResult.written
 
-    if (needsBackfill) {
-      // Stamp schemaVersion only when pull() confirms success by updating lastSync.
+    if (fullPull) {
+      // Stamp only when pull() confirms success by updating lastSync.
       // If pull failed, lastSync is unchanged and the next sync retries the full pull.
       const lastSyncAfterPull = await idb.getMeta("lastSync")
       if (lastSyncAfterPull !== lastSyncBeforePull) {
-        await idb.setMeta("schemaVersion", SCHEMA_VERSION)
+        if (needsBackfill) await idb.setMeta("schemaVersion", SCHEMA_VERSION)
+        if (datasetChanged) await idb.setMeta("datasetId", serverDatasetId!)
       }
     }
 

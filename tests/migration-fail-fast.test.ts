@@ -116,7 +116,13 @@ describe("runMigrations — fail-fast on permanent DB errors", () => {
     failSchemaTimes(0, new Error("unused"))
     await runMigrations()
     const sqls = client.query.mock.calls.map((c) => c[0] as string)
-    expect(sqls).toEqual(["SET statement_timeout = 0", "-- stub schema"])
+    // Dritte Anweisung: die Datenbestand-Kennung wird nach dem Schema auf
+    // derselben Verbindung angelegt (src/lib/db/dataset-id.ts).
+    expect(sqls).toEqual([
+      "SET statement_timeout = 0",
+      "-- stub schema",
+      expect.stringContaining("app_settings"),
+    ])
     expect(client.release).toHaveBeenCalledWith(true)
   })
 })

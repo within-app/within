@@ -3,6 +3,7 @@ import { join } from "path"
 import { DatabaseError } from "pg"
 import { db } from "@/lib/db"
 import { logError } from "@/lib/logger"
+import { ensureDatasetId } from "@/lib/db/dataset-id"
 
 const MAX_RETRIES = 30
 const RETRY_DELAY_MS = 2000
@@ -43,6 +44,9 @@ export async function runMigrations(): Promise<void> {
       try {
         await client.query("SET statement_timeout = 0")
         await client.query(schema)
+        // Datenbestand-Kennung: einmalig anlegen (frische DB oder Upgrade) —
+        // andere Geräte erkennen daran einen neuen Bestand (dataset-id.ts).
+        await ensureDatasetId(client)
       } finally {
         client.release(true)
       }

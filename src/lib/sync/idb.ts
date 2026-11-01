@@ -61,6 +61,11 @@ export interface IDBAdapter {
   putEntry(entry: SyncEntry): Promise<void>
   deleteEntry(id: string): Promise<void>
   getAllEntries(): Promise<SyncEntry[]>
+  /** Leert nur den Store "entries" — für den Neuabgleich nach einem Wechsel der
+   *  Datenbestand-Kennung (ein Full-Pull upsertet nur; Einträge, die der Server
+   *  nicht mehr hat, blieben sonst stehen). editQueue, mediaOutbox,
+   *  pinnedEntries und meta bleiben unberührt. */
+  clearEntries?(): Promise<void>
   enqueueEdit(edit: QueuedEdit): Promise<void>
   dequeueEdit(entryId: string): Promise<void>
   listQueue(): Promise<QueuedEdit[]>
@@ -207,6 +212,13 @@ export const rawIDBAdapter: IDBAdapter = {
     const db = await getDB()
     return tx(db, "entries", "readonly", (t) =>
       req2<SyncEntry[]>(t.objectStore("entries").getAll())
+    )
+  },
+
+  async clearEntries() {
+    const db = await getDB()
+    await tx(db, "entries", "readwrite", (t) =>
+      req2(t.objectStore("entries").clear())
     )
   },
 

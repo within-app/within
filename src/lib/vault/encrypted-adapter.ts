@@ -204,6 +204,7 @@ export function createEncryptedAdapter(raw: IDBAdapter): IDBAdapter {
       await raw.putEntry((await encodeFor("id", entry)) as typeof entry)
     },
     deleteEntry: (id) => raw.deleteEntry(id),
+    clearEntries: raw.clearEntries ? () => raw.clearEntries!() : undefined,
     async getAllEntries() {
       return decodeMany(await raw.getAllEntries())
     },

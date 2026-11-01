@@ -156,7 +156,7 @@ By default backups go to `./backups` next to your compose file. **A copy on the 
   source: ./backups        →        source: /mnt/my-external-drive/within
 ```
 
-**Restoring** happens in the app: after a fresh setup with the same backup drive attached, *Settings → Backup* lists your backups and puts them back with one click (password and a typed confirmation when the installation is not empty). Restoring by hand, running a backup manually, and how the retention works (7 daily + 4 weekly copies) are described in [docs/backup-restore.md](docs/backup-restore.md).
+**Restoring** happens in the app: after a fresh setup with the same backup drive attached, *Settings → Backup* lists your backups and puts them back with one click (password and a typed confirmation when the installation is not empty). Other devices notice the restored dataset on their next sync and download everything again by themselves — nothing to reset by hand. Restoring by hand, running a backup manually, and how the retention works (7 daily + 4 weekly copies) are described in [docs/backup-restore.md](docs/backup-restore.md).
 
 ## Updating, and going back
 

@@ -4,6 +4,7 @@ import { dirname } from "path"
 import { logError, logWarn } from "@/lib/logger"
 import { safeMediaPath } from "@/lib/media-security"
 import { deleteOrphanTags, orphanTagIds } from "@/lib/db/tags"
+import { rotateDatasetId } from "@/lib/db/dataset-id"
 import { UpdateJournalSchema } from "@/lib/schemas/journal.schema"
 import { readJsonBody, validationError } from "@/lib/schemas"
 
@@ -97,6 +98,10 @@ export async function DELETE(
         await client.query("ROLLBACK").catch(() => {})
         return NextResponse.json({ error: "Journal nicht gefunden", code: "journal_not_found" }, { status: 404 })
       }
+      // Harter Delete ohne Tombstones: andere Geräte bekämen über den
+      // Delta-Sync nie ein Signal. Neue Datenbestand-Kennung in derselben
+      // Transaktion — beim nächsten Sync ziehen sie alles neu.
+      await rotateDatasetId(client)
       await client.query("COMMIT")
       // Der Cascade hat entry_tags gelöscht — Kandidaten erst jetzt, im
       // frischen Snapshot, bestimmen (auch parallel verknüpfte Tags).

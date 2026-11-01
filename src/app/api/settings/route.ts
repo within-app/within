@@ -4,6 +4,8 @@ import { UpdateSettingsSchema } from "@/lib/schemas/settings.schema"
 import { readJsonBody, validationError } from "@/lib/schemas"
 import { logError, logWarn } from "@/lib/logger"
 
+import { DATASET_ID_KEY } from "@/lib/db/dataset-id"
+
 const LOCALE_KEY = "locale"
 
 export async function GET() {
@@ -11,8 +13,17 @@ export async function GET() {
 
   try {
     const { db } = await import("@/lib/db")
-    const { rows } = await db.query(`SELECT value FROM app_settings WHERE key = $1`, [LOCALE_KEY])
-    return NextResponse.json({ locale: rows[0]?.value ?? null })
+    // locale für die UI, datasetId als Sync-Probe (engine.ts vergleicht die
+    // Kennung vor jedem Sync — ein anderer Bestand erzwingt den Neuabgleich).
+    const { rows } = await db.query(
+      `SELECT key, value FROM app_settings WHERE key = ANY($1::text[])`,
+      [[LOCALE_KEY, DATASET_ID_KEY]]
+    )
+    const byKey = new Map<string, string>(rows.map((r: { key: string; value: string }) => [r.key, r.value]))
+    return NextResponse.json({
+      locale: byKey.get(LOCALE_KEY) ?? null,
+      datasetId: byKey.get(DATASET_ID_KEY) ?? null,
+    })
   } catch (error) {
     logWarn("[GET /api/settings] DB error:", error)
     return dbUnavailableResponse()

@@ -26,6 +26,7 @@ function makeStubIDB(): IDBAdapter {
     clearConflict: async (id) => { conflicts.delete(id) },
     getMeta:       async (k)  => meta.get(k) ?? null,
     setMeta:       async (k, v) => { meta.set(k, v) },
+    deleteMeta:    async (k)  => { meta.delete(k) },
     // Pin store stubs
     putPin:        async () => {},
     getPin:        async () => undefined,
@@ -249,5 +250,215 @@ describe("sync() — schema version backfill", () => {
     await createSyncEngine(idb).sync()
     const pullUrl: string = fetchMock.mock.calls[1][0]
     expect(pullUrl).toContain(`since=${encodeURIComponent(storedLastSync)}`)
+  })
+})
+
+// ── Datenbestand-Kennung (datasetId): Neuabgleich nach Restore/Neuaufsetzen/Journal-Löschung ──
+// Der Server stempelt jeden Datenbestand mit einer UUID (app_settings.dataset_id)
+// und wechselt sie bei Restore, Neuaufsetzen und Journal-Löschung. Ein Gerät,
+// dessen gemerkte Kennung abweicht, verwirft seinen Entries-Bestand und zieht
+// alles neu — Push bleibt vorher, damit offline Geschriebenes nicht verloren geht.
+describe("sync() — Datenbestand-Kennung (datasetId)", () => {
+  const serverTime = "2026-07-04T12:00:00.000Z"
+  const epochSince = "1970-01-01T00:00:00.000Z"
+  const storedLastSync = "2026-07-01T10:00:00.000Z"
+
+  /** Stub mit clearEntries und einem Ereignis-Log für die Reihenfolge. */
+  function stubWithLog() {
+    const base = makeStubIDB()
+    const log: string[] = []
+    const idb: IDBAdapter = {
+      ...base,
+      clearEntries: async () => {
+        log.push("clear")
+        for (const e of await base.getAllEntries()) await base.deleteEntry(e.id)
+      },
+    }
+    return { idb, log }
+  }
+
+  /** fetch-Mock, der nach URL antwortet und jede Anfrage im Log vermerkt. */
+  function routedFetch(log: string[], opts: { datasetId?: string | null; pullOk?: boolean; pushOk?: boolean; serverEntries?: SyncEntry[] }) {
+    return vi.fn(async (url: string, init?: RequestInit) => {
+      const path = url.split("?")[0]
+      log.push(`${init?.method ?? "GET"} ${path}`)
+      if (path.endsWith("/api/settings")) {
+        const body: Record<string, unknown> = { locale: null }
+        if (opts.datasetId !== undefined && opts.datasetId !== null) body.datasetId = opts.datasetId
+        return { ok: true, status: 200, json: async () => body }
+      }
+      if (path.endsWith("/api/sync/upsert")) {
+        if (opts.pushOk === false) return { ok: false, status: 503, json: async () => ({}) }
+        const sent = JSON.parse(String(init?.body ?? "{}")) as { entries?: Array<{ id: string }> }
+        return { ok: true, status: 200, json: async () => ({ accepted: (sent.entries ?? []).map((e) => e.id), conflicts: [] }) }
+      }
+      if (path.endsWith("/api/sync/changes")) {
+        if (opts.pullOk === false) return { ok: false, status: 503, json: async () => ({}) }
+        return { ok: true, status: 200, json: async () => ({ entries: opts.serverEntries ?? [], nextCursor: null, serverTime }) }
+      }
+      return { ok: true, status: 200, json: async () => ({}) }
+    })
+  }
+
+  afterEach(() => vi.restoreAllMocks())
+
+  it("gleiche Kennung → kein Reset, Delta-Pull ab lastSync, Kennung bleibt", async () => {
+    const { idb, log } = stubWithLog()
+    await idb.setMeta("schemaVersion", "2")
+    await idb.setMeta("lastSync", storedLastSync)
+    await idb.setMeta("datasetId", "ds-1")
+    await idb.putEntry(makeSyncEntry("20000000-0000-4000-8000-000000000001"))
+    const fetchMock = routedFetch(log, { datasetId: "ds-1" })
+    vi.stubGlobal("fetch", fetchMock)
+    await createSyncEngine(idb).sync()
+    expect(log).not.toContain("clear")
+    const pullUrl = fetchMock.mock.calls.map((c) => String(c[0])).find((u) => u.includes("/api/sync/changes"))!
+    expect(pullUrl).toContain(`since=${encodeURIComponent(storedLastSync)}`)
+    expect(await idb.getMeta("datasetId")).toBe("ds-1")
+    expect(await idb.getAllEntries()).toHaveLength(1)
+  })
+
+  it("andere Kennung → Reihenfolge push, clear, Full-Pull ab Epoche, dann Stempel", async () => {
+    const { idb, log } = stubWithLog()
+    await idb.setMeta("schemaVersion", "2")
+    await idb.setMeta("lastSync", storedLastSync)
+    await idb.setMeta("datasetId", "ds-1")
+    const stale = makeSyncEntry("20000000-0000-4000-8000-000000000001")
+    await idb.putEntry(stale)
+    // Offline geschriebener Eintrag wartet in der Queue — muss VOR dem Reset hoch.
+    const local = makeSyncEntry("20000000-0000-4000-8000-000000000002")
+    await idb.putEntry(local)
+    await idb.enqueueEdit({ entryId: local.id, operation: "create", payload: local, queuedAt: new Date().toISOString() })
+    const fromServer = makeSyncEntry("20000000-0000-4000-8000-000000000003")
+    const fetchMock = routedFetch(log, { datasetId: "ds-2", serverEntries: [local, fromServer] })
+    vi.stubGlobal("fetch", fetchMock)
+
+    const result = await createSyncEngine(idb).sync()
+
+    const iPush = log.indexOf("POST /api/sync/upsert")
+    const iClear = log.indexOf("clear")
+    const iPull = log.indexOf("GET /api/sync/changes")
+    expect(iPush).toBeGreaterThanOrEqual(0)
+    expect(iClear).toBeGreaterThan(iPush)
+    expect(iPull).toBeGreaterThan(iClear)
+    const pullUrl = fetchMock.mock.calls.map((c) => String(c[0])).find((u) => u.includes("/api/sync/changes"))!
+    expect(pullUrl).toContain(`since=${encodeURIComponent(epochSince)}`)
+    expect(pullUrl).not.toContain("2026-07-01")
+    // Stempel erst nach dem erfolgreichen Pull
+    expect(await idb.getMeta("datasetId")).toBe("ds-2")
+    // Alter Bestand weg, Server-Bestand da
+    const ids = (await idb.getAllEntries()).map((e) => e.id).sort()
+    expect(ids).toEqual([local.id, fromServer.id].sort())
+    expect(result.pushed).toBe(1)
+  })
+
+  it("Pull-Fehler nach Reset → kein Stempel; der nächste Sync wiederholt den Full-Pull", async () => {
+    const { idb, log } = stubWithLog()
+    await idb.setMeta("schemaVersion", "2")
+    await idb.setMeta("lastSync", storedLastSync)
+    await idb.setMeta("datasetId", "ds-1")
+    await idb.putEntry(makeSyncEntry("20000000-0000-4000-8000-000000000001"))
+    vi.stubGlobal("fetch", routedFetch(log, { datasetId: "ds-2", pullOk: false }))
+    const first = await createSyncEngine(idb).sync()
+    expect(first.pullFailed).toBe(true)
+    expect(await idb.getMeta("datasetId")).toBe("ds-1")
+
+    // Zweiter Sync: Server erreichbar → wieder Full-Pull, jetzt Stempel.
+    const log2: string[] = []
+    const fetch2 = routedFetch(log2, { datasetId: "ds-2", serverEntries: [makeSyncEntry("20000000-0000-4000-8000-000000000009")] })
+    vi.stubGlobal("fetch", fetch2)
+    await createSyncEngine(idb).sync()
+    const pullUrl = fetch2.mock.calls.map((c) => String(c[0])).find((u) => u.includes("/api/sync/changes"))!
+    expect(pullUrl).toContain(`since=${encodeURIComponent(epochSince)}`)
+    expect(await idb.getMeta("datasetId")).toBe("ds-2")
+    expect((await idb.getAllEntries()).map((e) => e.id)).toEqual(["20000000-0000-4000-8000-000000000009"])
+  })
+
+  it("Kennung lokal unbekannt (erstes Mal) → nur stempeln, kein Reset, Delta-Pull", async () => {
+    const { idb, log } = stubWithLog()
+    await idb.setMeta("schemaVersion", "2")
+    await idb.setMeta("lastSync", storedLastSync)
+    await idb.putEntry(makeSyncEntry("20000000-0000-4000-8000-000000000001"))
+    const fetchMock = routedFetch(log, { datasetId: "ds-1" })
+    vi.stubGlobal("fetch", fetchMock)
+    await createSyncEngine(idb).sync()
+    expect(log).not.toContain("clear")
+    const pullUrl = fetchMock.mock.calls.map((c) => String(c[0])).find((u) => u.includes("/api/sync/changes"))!
+    expect(pullUrl).toContain(`since=${encodeURIComponent(storedLastSync)}`)
+    expect(await idb.getMeta("datasetId")).toBe("ds-1")
+    expect(await idb.getAllEntries()).toHaveLength(1)
+  })
+
+  it("Server ohne Kennung (älterer Stand) → weder Stempel noch Reset", async () => {
+    const { idb, log } = stubWithLog()
+    await idb.setMeta("schemaVersion", "2")
+    await idb.setMeta("lastSync", storedLastSync)
+    await idb.setMeta("datasetId", "ds-1")
+    vi.stubGlobal("fetch", routedFetch(log, { datasetId: null }))
+    await createSyncEngine(idb).sync()
+    expect(log).not.toContain("clear")
+    expect(await idb.getMeta("datasetId")).toBe("ds-1")
+  })
+
+  it("Push scheitert transient (503) → der gequeuete Eintrag bleibt nach dem Reset sichtbar und in der Queue", async () => {
+    const { idb, log } = stubWithLog()
+    await idb.setMeta("schemaVersion", "2")
+    await idb.setMeta("lastSync", storedLastSync)
+    await idb.setMeta("datasetId", "ds-1")
+    const stale = makeSyncEntry("20000000-0000-4000-8000-000000000001")
+    await idb.putEntry(stale)
+    const local = makeSyncEntry("20000000-0000-4000-8000-000000000002")
+    await idb.putEntry(local)
+    await idb.enqueueEdit({ entryId: local.id, operation: "create", payload: local, queuedAt: new Date().toISOString() })
+    const fromServer = makeSyncEntry("20000000-0000-4000-8000-000000000003")
+    vi.stubGlobal("fetch", routedFetch(log, { datasetId: "ds-2", pushOk: false, serverEntries: [fromServer] }))
+
+    const result = await createSyncEngine(idb).sync()
+
+    expect(log).toContain("clear")
+    expect(result.errors).toBeGreaterThan(0)
+    // Der Spiegel des offline geschriebenen Eintrags ist wieder da, der alte Bestand nicht
+    const ids = (await idb.getAllEntries()).map((e) => e.id).sort()
+    expect(ids).toEqual([local.id, fromServer.id].sort())
+    expect((await idb.listQueue()).map((q) => q.entryId)).toEqual([local.id])
+    expect(await idb.getMeta("datasetId")).toBe("ds-2")
+  })
+
+  it("Medien-Cache-Schlüssel (entryMedia:<id>) werden beim Neuabgleich verworfen, auch ohne lokalen Vorgänger", async () => {
+    const { entryMediaMetaKey } = await import("@/lib/sync/entry-media-cache")
+    const { idb, log } = stubWithLog()
+    await idb.setMeta("schemaVersion", "2")
+    await idb.setMeta("lastSync", storedLastSync)
+    await idb.setMeta("datasetId", "ds-1")
+    const entry = makeSyncEntry("20000000-0000-4000-8000-000000000001")
+    await idb.putEntry(entry)
+    await idb.setMeta(entryMediaMetaKey(entry.id), JSON.stringify({ media: ["stale"] }))
+    vi.stubGlobal("fetch", routedFetch(log, { datasetId: "ds-2", serverEntries: [entry] }))
+    await createSyncEngine(idb).sync()
+    expect(await idb.getMeta(entryMediaMetaKey(entry.id))).toBeNull()
+  })
+
+  it("Schema-Backfill und Kennungswechsel zugleich → ein Full-Pull, danach beide Stempel", async () => {
+    const { idb, log } = stubWithLog()
+    await idb.setMeta("lastSync", storedLastSync)
+    await idb.setMeta("datasetId", "ds-1")
+    const fetchMock = routedFetch(log, { datasetId: "ds-2" })
+    vi.stubGlobal("fetch", fetchMock)
+    await createSyncEngine(idb).sync()
+    expect(fetchMock.mock.calls.map((c) => String(c[0])).filter((u) => u.includes("/api/sync/changes"))).toHaveLength(1)
+    expect(await idb.getMeta("schemaVersion")).toBe("2")
+    expect(await idb.getMeta("datasetId")).toBe("ds-2")
+  })
+
+  it("Adapter ohne clearEntries (älterer Client-Code) → kein Absturz, Full-Pull und Stempel trotzdem", async () => {
+    const idb = makeStubIDB()
+    await idb.setMeta("schemaVersion", "2")
+    await idb.setMeta("lastSync", storedLastSync)
+    await idb.setMeta("datasetId", "ds-1")
+    const log: string[] = []
+    const fetchMock = routedFetch(log, { datasetId: "ds-2" })
+    vi.stubGlobal("fetch", fetchMock)
+    await expect(createSyncEngine(idb).sync()).resolves.toBeDefined()
+    expect(await idb.getMeta("datasetId")).toBe("ds-2")
   })
 })

@@ -161,6 +161,11 @@ if [[ -n "$paused_at" ]]; then
   psql "${DATABASE_URL}" -c "INSERT INTO app_settings (key, value) VALUES ('backup_paused_at', '${paused_at}')" > /dev/null 2>&1 || true
 fi
 
+# New dataset id: the dump carries the id other devices synced against before
+# the restore. A fresh one makes every device drop its delta cursor and pull
+# the restored state completely on its next sync (src/lib/db/dataset-id.ts).
+psql "${DATABASE_URL}" -v ON_ERROR_STOP=1 -c "INSERT INTO app_settings (key, value, updated_at) VALUES ('dataset_id', gen_random_uuid()::text, NOW()) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()" > /dev/null
+
 entries="$(psql "${DATABASE_URL}" -At -c "SELECT COUNT(*) FROM entries WHERE deleted_at IS NULL")"
 media="$(psql "${DATABASE_URL}" -At -c "SELECT COUNT(*) FROM media")"
 psql "${DATABASE_URL}" -v ON_ERROR_STOP=1 -c \

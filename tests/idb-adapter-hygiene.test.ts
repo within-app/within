@@ -117,3 +117,36 @@ describe("getDB-Memoisierung", () => {
     expect(vaultOpens.length).toBeLessThanOrEqual(1)
   })
 })
+
+describe("clearEntries (Datenbestand-Kennung)", () => {
+  it("leert nur den Store entries — editQueue, mediaOutbox, pinnedEntries und meta bleiben", async () => {
+    const idb = await freshAdapter()
+    const entry = {
+      id: "entry-1", journalId: "j-1", text: "synthetic", createdAt: "2026-07-01T10:00:00.000Z",
+      updatedAt: "2026-07-01T10:00:00.000Z", revisionId: "r-1", starred: false, tags: [],
+      locationName: null, locationLat: null, locationLng: null, weatherDescription: null,
+      weatherTempCelsius: null, weatherIcon: null, deletedAt: null, thumbnailDataUrl: null,
+    }
+    await idb.putEntry(entry)
+    await idb.putEntry({ ...entry, id: "entry-2" })
+    await idb.enqueueEdit({ entryId: "entry-9", operation: "create", payload: { ...entry, id: "entry-9" }, queuedAt: "2026-07-01T10:00:00.000Z" })
+    await idb.putOutboxMedia!(makeItem({ id: "outbox-9", entryId: "entry-9" }))
+    await idb.putPin({ entryId: "entry-1", pinnedAt: "2026-07-01T10:00:00.000Z", mediaUrls: [] } as never)
+    await idb.setMeta("lastSync", "2026-07-01T10:00:00.000Z")
+
+    expect(idb.clearEntries).toBeTypeOf("function")
+    await idb.clearEntries!()
+
+    expect(await idb.getAllEntries()).toHaveLength(0)
+    expect(await idb.listQueue()).toHaveLength(1)
+    expect(await idb.listOutboxMedia!()).toHaveLength(1)
+    expect(await idb.listPins()).toHaveLength(1)
+    expect(await idb.getMeta("lastSync")).toBe("2026-07-01T10:00:00.000Z")
+  })
+
+  it("ist auf leerem Store ein No-op", async () => {
+    const idb = await freshAdapter()
+    await expect(idb.clearEntries!()).resolves.toBeUndefined()
+    expect(await idb.getAllEntries()).toHaveLength(0)
+  })
+})

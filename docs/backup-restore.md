@@ -134,11 +134,15 @@ Things to know:
 - **Media are always restored to the state of the last backup**, whichever
   dump you pick — the media folder is mirrored as a whole, not per dump. If
   you need media files that were deleted later, see `media-deleted/`.
-- **Other devices** that used Within before the crash keep their own offline
-  copy and sync cursor. After a restore, log in there once more and reset
-  the local data ("Forgot PIN" on the lock screen wipes only the local copy;
-  the server keeps the source of truth) so the device pulls the restored
-  state completely.
+- **Other devices** that used Within before the crash re-sync automatically:
+  every restore (like a fresh setup or deleting a journal) gives the database
+  a new dataset id (`app_settings.dataset_id`); a device whose remembered id
+  differs uploads what it still has queued, drops its local entries and pulls
+  the restored state completely on its next sync. A device that has not
+  synced since this version was installed (or still runs an older app
+  version) has no remembered id yet and needs the manual way once: log in
+  once more and reset the local data ("Forgot PIN" on the lock screen wipes
+  only the local copy; the server keeps the source of truth).
 - Only successful nightly runs produce dumps, so anything in the list is
   restorable; a dump that fails `pg_restore --list` is refused before
   anything is dropped.
@@ -193,6 +197,17 @@ docker compose exec db psql -U journal -d template1 \
 ```bash
 docker compose exec -T db pg_restore -U journal --dbname=journal \
   --no-acl --no-owner < "$DUMP"
+```
+
+### 4b. Give the restored dataset a new id
+
+The dump carries the dataset id other devices synced against before the
+restore. A new id makes every device pull the restored state completely on
+its next sync (the in-app restore does this by itself):
+
+```bash
+docker compose exec db psql -U journal -d journal \
+  -c "INSERT INTO app_settings (key, value, updated_at) VALUES ('dataset_id', gen_random_uuid()::text, NOW()) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW();"
 ```
 
 ### 5. Restore media
