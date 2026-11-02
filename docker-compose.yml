@@ -14,9 +14,10 @@ x-settings: &settings
   #    (If your password contains a "$", write it as "$$".)
   APP_PASSWORD: "change-me"
 
-  # 2) Your time zone (IANA name, e.g. Europe/Berlin, America/New_York, Asia/Tokyo).
+  # 2) Your time zone (IANA name). Preset to Berlin; other examples, written
+  #    exactly like this: London "Europe/London", New York "America/New_York".
   #    Determines which day an entry belongs to and which clock time is shown.
-  APP_TIMEZONE: "UTC"
+  APP_TIMEZONE: "Europe/Berlin"
 
   # 3) The fixed network address of this server in your home network
   #    (e.g. 192.168.1.50). Give the server a fixed address in your router

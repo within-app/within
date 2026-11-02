@@ -59,11 +59,13 @@ Open `docker-compose.yml` in any text editor. The first block looks like this â€
 ```yaml
 x-settings: &settings
   APP_PASSWORD: "change-me"          # the password you will log in with
-  APP_TIMEZONE: "UTC"                # e.g. Europe/Berlin, America/New_York
+  APP_TIMEZONE: "Europe/Berlin"      # London: "Europe/London", New York: "America/New_York"
   APP_HOST_IP: "192.168.1.50"        # the fixed address from step 1
 ```
 
 That is all. Database password, session keys and the certificate are created automatically on the first start. (If your password contains a `$`, write it as `$$`.)
+
+The time zone is preset to Berlin. If you live elsewhere, replace it with your zone's IANA name, written exactly like these two examples: London `APP_TIMEZONE: "Europe/London"`, New York `APP_TIMEZONE: "America/New_York"`. The zone decides which day an entry is filed under and which clock time is shown.
 
 > **Docker Desktop on Mac or Windows:** the folder must be inside your home directory (`~/within` is fine). Folders elsewhere are not shared with Docker and the start fails with `mounts denied`.
 >

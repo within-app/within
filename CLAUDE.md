@@ -14,7 +14,7 @@ At the end, the user can open `https://<server address>` from a computer in the 
 
 1. **Check prerequisites.** `docker --version` and `docker compose version` (Compose ≥ 2.23). 64-bit OS (`uname -m` → `x86_64` or `aarch64`). At least 4 GB RAM (`free -h` on Linux). If Docker is missing on Linux: `curl -fsSL https://get.docker.com | sh` and add the user to the `docker` group. Report what is missing instead of guessing.
 2. **Find the server's address in the home network.** Linux: `hostname -I | awk '{print $1}'`; macOS: `ipconfig getifaddr en0`. Tell the user this address and that it must be **fixed in the router** (DHCP reservation) — you cannot do that step for them; explain where it is on a FRITZ!Box (*Home Network → Network → Network Connections → pencil icon → "Always assign the same IPv4 address"*).
-3. **Ask for two things** (do not invent them): the login password they want, and their time zone as an IANA name (e.g. `Europe/Berlin`, `America/New_York`). If the system time zone is set (`timedatectl` / `cat /etc/timezone`), propose it.
+3. **Ask for two things** (do not invent them): the login password they want, and their time zone as an IANA name (e.g. `Europe/Berlin`, `Europe/London`, `America/New_York`; the file is preset to `Europe/Berlin`). If the system time zone is set (`timedatectl` / `cat /etc/timezone`), propose it.
 4. **Create the folder and fetch the compose file** — inside the user's home directory (Docker Desktop on Mac/Windows can only mount folders there):
    ```bash
    mkdir -p ~/within && cd ~/within
