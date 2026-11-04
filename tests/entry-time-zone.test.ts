@@ -7,8 +7,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import { readFileSync } from "fs"
 import { join } from "path"
-import { setAppTimeZone, streakLength, zoneOf, DEFAULT_TIME_ZONE } from "@/lib/timezone"
+import { deviceTodayDate, setAppTimeZone, streakLength, zoneOf, DEFAULT_TIME_ZONE } from "@/lib/timezone"
 import { formatEntryDate, formatEntryTime } from "@/lib/format"
+import { todayAnchor } from "@/components/on-this-day/on-this-day-view"
 import { withEntryDay, withEntryTime, entryTimeString } from "@/lib/editor/entry-date"
 import { idbToStats, idbToCalendarData } from "@/lib/sync/idb-to-views"
 import { syncEntriesToDateGroups } from "@/lib/sync/idb-to-timeline"
@@ -71,8 +72,17 @@ describe("streakLength", () => {
   it("zählt einen Tag, der östlich der App-Zone schon morgen ist", () => {
     expect(streakLength(days("2026-07-11", "2026-07-10"), "2026-07-10")).toBe(2)
   })
-  it("ein einzelner auf morgen datierter Eintrag wertet die Serie nicht ab", () => {
-    expect(streakLength(days("2026-07-11", "2026-07-09", "2026-07-08"), "2026-07-10")).toBe(2)
+  it("heute ausgelassen, Eintrag für morgen: die Serie beginnt wieder bei 1", () => {
+    expect(streakLength(days("2026-07-11", "2026-07-09", "2026-07-08"), "2026-07-10")).toBe(1)
+  })
+  it("heute ausgelassen, am nächsten Tag geschrieben: ebenfalls 1", () => {
+    expect(streakLength(days("2026-07-11", "2026-07-09", "2026-07-08"), "2026-07-11")).toBe(1)
+  })
+  it("ein nachgetragener Tag schließt die Lücke", () => {
+    expect(streakLength(days("2026-07-11", "2026-07-10", "2026-07-09"), "2026-07-11")).toBe(3)
+  })
+  it("was weiter als morgen in der Zukunft liegt, zählt nicht", () => {
+    expect(streakLength(days("2026-07-12", "2026-07-09", "2026-07-08"), "2026-07-10")).toBe(2)
   })
 })
 
@@ -106,6 +116,7 @@ describe("Anzeige", () => {
       vi.setSystemTime(new Date("2026-11-04T17:00:00.000Z")) // Tokio: 05.11. 02:00
       expect(formatEntryDate("2026-11-04T17:00:00.000Z", "de", "Asia/Tokyo")).toBe("Heute")
       expect(kopf("2026-11-05")).toBe("Heute")
+      expect(deviceTodayDate().getDate()).toBe(5)
     })
     it("zu Hause mit einem Eintrag aus Tokio", () => {
       onDevice("Europe/Berlin")
@@ -159,6 +170,51 @@ describe("Offline-Ansichten rechnen je Eintrag", () => {
     expect(idbToStats([a, bangkok], null).streak).toBe(2)
     const nurBerlin = { ...bangkok, timeZone: null }
     expect(idbToStats([a, nurBerlin], null).streak).toBe(0)
+  })
+})
+
+describe("Serie rechnet ab dem Tag des Geräts", () => {
+  const onDevice = (tz: string) => {
+    vi.stubGlobal("window", {})
+    vi.stubEnv("TZ", tz)
+  }
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    vi.unstubAllEnvs()
+    vi.useRealTimers()
+  })
+
+  it("in Los Angeles nachmittags lebt sie noch, obwohl in Berlin schon der übernächste Tag ist", () => {
+    onDevice("America/Los_Angeles")
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date("2026-11-06T00:00:00.000Z")) // LA: 05.11. 16:00, Berlin: 06.11. 01:00
+    const gestern = entry({ id: "la", createdAt: "2026-11-04T20:00:00.000Z", timeZone: "America/Los_Angeles" })
+    expect(idbToStats([gestern], null).streak).toBe(1)
+  })
+  it("in Sydney morgens ist sie gerissen, obwohl in Berlin noch gestern wäre", () => {
+    onDevice("Australia/Sydney")
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date("2026-11-05T21:00:00.000Z")) // Sydney: 06.11. 08:00, Berlin: 05.11. 22:00
+    const vorgestern = entry({ id: "sy", createdAt: "2026-11-04T01:00:00.000Z", timeZone: "Australia/Sydney" }) // 04.11. 12:00
+    expect(idbToStats([vorgestern], null).streak).toBe(0)
+  })
+  it("„An diesem Tag“ zählt offline ab dem Tag des Geräts", () => {
+    onDevice("America/Los_Angeles")
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date("2026-11-06T00:00:00.000Z")) // LA: 05.11., Berlin: 06.11.
+    const vorEinemJahr = entry({ id: "alt", createdAt: "2025-11-05T20:00:00.000Z", timeZone: "America/Los_Angeles" })
+    expect(idbToStats([vorEinemJahr], null).onThisDayCount).toBe(1)
+    expect(todayAnchor()).toBe("2026-11-05")
+  })
+  it("zu Hause mit einem Eintrag aus Australien, der schon morgen steht, und nichts von heute", () => {
+    onDevice("Europe/Berlin")
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date("2026-11-04T20:00:00.000Z")) // Berlin: 04.11. 21:00, Sydney: 05.11. 07:00
+    const vorgestern = entry({ id: "b1", createdAt: "2026-11-02T12:00:00.000Z", timeZone: "Europe/Berlin" })
+    const gestern = entry({ id: "b2", createdAt: "2026-11-03T12:00:00.000Z", timeZone: "Europe/Berlin" })
+    expect(idbToStats([vorgestern, gestern], null).streak).toBe(2)
+    const sydney = entry({ id: "sy", createdAt: "2026-11-04T20:00:00.000Z", timeZone: "Australia/Sydney" })
+    expect(idbToStats([vorgestern, gestern, sydney], null).streak).toBe(1)
   })
 })
 

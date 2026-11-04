@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { dbUnavailableResponse } from "@/lib/env"
 import type { JournalStats } from "@/types/journal"
 import { logWarn } from "@/lib/logger"
-import { dateKey, getAppTimeZone, monthDay, streakLength } from "@/lib/timezone"
+import { dateKey, getAppTimeZone, shiftDateKey, streakLength } from "@/lib/timezone"
 
 type StatsRow = {
   total_entries: number
@@ -22,9 +22,16 @@ export async function GET(req: NextRequest) {
   try {
     const { db } = await import("@/lib/db")
 
-    const now = new Date()
     const tz = getAppTimeZone()
-    const todayMonthDay = monthDay(now, tz)
+    // Serie und „An diesem Tag“ rechnen ab dem Tag des Geräts. Zwei Zonen liegen
+    // höchstens 26 Stunden auseinander, also zwei Kalendertage; alles darüber ist
+    // eine falsche Uhr und zählt nicht.
+    const appToday = dateKey(new Date(), tz)
+    const deviceToday = searchParams.get("today")
+    const today = deviceToday && [-2, -1, 0, 1, 2].some((days) => shiftDateKey(appToday, days) === deviceToday)
+      ? deviceToday
+      : appToday
+    const todayMonthDay = today.slice(5)
 
     // Single query with CTEs — uses one pool connection instead of six.
     const { rows } = await db.query<StatsRow>(
@@ -70,7 +77,7 @@ export async function GET(req: NextRequest) {
     const row = rows[0]
 
     // Calculate streak from the pre-aggregated day set.
-    const streak = streakLength(new Set(row.streak_days), dateKey(now, tz))
+    const streak = streakLength(new Set(row.streak_days), today)
 
     const result: JournalStats = {
       streak,

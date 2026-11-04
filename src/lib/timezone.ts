@@ -70,9 +70,17 @@ export function deviceTimeZone(): string | null {
  * müssen dasselbe sagen, auch wenn Gerät, Eintrag und App-Zone auseinanderliegen.
  * Auf dem Server gibt es kein Gerät, dort gilt die App-Zone.
  */
-export function deviceTodayKey(): string {
+export function deviceTodayKey(now: Date = new Date()): string {
   const tz = typeof window === "undefined" ? getAppTimeZone() : deviceTimeZone() ?? getAppTimeZone()
-  return dateKey(new Date(), tz)
+  return dateKey(now, tz)
+}
+
+/**
+ * Derselbe Tag als Date, dessen lokale Felder ihn zeigen (Mittag), für date-fns.
+ * Wie toZonedDate nur zum Formatieren, nie als Zeitpunkt weiterrechnen.
+ */
+export function deviceTodayDate(): Date {
+  return new Date(`${deviceTodayKey()}T12:00:00`)
 }
 
 export interface ZonedParts {
@@ -165,19 +173,19 @@ export function shiftDateKey(key: string, days: number): string {
 }
 
 /**
- * Serie: aufeinanderfolgende Tage bis zum letzten Eintrag. Gestern gilt als
- * Start, solange heute noch nichts steht. Morgen zählt auch, weil ein Eintrag
- * östlich der App-Zone dort schon am nächsten Tag stehen kann; die längere Kette
- * gewinnt, damit ein einzeln auf morgen datierter Eintrag die Serie nicht abwertet.
+ * Serie: aufeinanderfolgende Tage rückwärts ab dem jüngsten Eintrag, die erste
+ * Lücke beendet sie. Gestern gilt als Start, solange heute noch nichts steht.
+ * Morgen zählt auch, weil ein Eintrag aus einer Zone weiter östlich dort schon am
+ * nächsten Tag stehen kann. Der jüngste dieser drei Tage entscheidet: Steht morgen
+ * etwas und heute nichts, ist die Serie 1. Weiter in der Zukunft
+ * Datiertes zählt nicht, das erreicht keine Zeitzone.
  */
 export function streakLength(days: Set<string>, todayKey: string): number {
-  const chainFrom = (start: string) => {
-    let length = 0
-    while (days.has(shiftDateKey(start, -length))) length++
-    return length
-  }
-  const current = chainFrom(days.has(todayKey) ? todayKey : shiftDateKey(todayKey, -1))
-  return Math.max(current, chainFrom(shiftDateKey(todayKey, 1)))
+  const start = [shiftDateKey(todayKey, 1), todayKey, shiftDateKey(todayKey, -1)].find((day) => days.has(day))
+  if (!start) return 0
+  let length = 0
+  while (days.has(shiftDateKey(start, -length))) length++
+  return length
 }
 
 export interface WallClock {

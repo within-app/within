@@ -2,10 +2,10 @@
  * "An diesem Tag" — Vollbild-Lese-Ansicht (Session 2026-08-05)
  *
  * Verifiziert:
- * 1. Tages-Anker-Helfer: Kalendertag der App-Zone (Einstieg = heutiger Tag,
- *    Standardzone UTC, wie month_day_in serverseitig und idbToStats
- *    clientseitig), Blättern über Monats-/Jahresgrenzen, Schalttag-Verhalten
- *    (29.02. nur im Schaltjahr-Anker).
+ * 1. Tages-Anker-Helfer: Einstieg = heutiger Tag des Geräts, ohne Browser (hier)
+ *    der App-Zone, Standardzone UTC; der Gerätezweig steht in
+ *    entry-time-zone.test.ts. Blättern über Monats-/Jahresgrenzen,
+ *    Schalttag-Verhalten (29.02. nur im Schaltjahr-Anker).
  * 2. loadOnThisDayFull: ein Request pro Tag (onThisDay + full=true), Sortierung
  *    neuestes-Jahr-oben, IDB-Fallback mit Medien-Cache-Merge, null wenn beides
  *    scheitert.
@@ -73,7 +73,7 @@ function makeFullEntry(id: string, createdAt: string): FullTimelineEntry {
 
 // ── Tages-Anker-Helfer ───────────────────────────────────────────────────────
 
-describe("todayAnchor / monthDayOf — Kalendertag der App-Zone", () => {
+describe("todayAnchor / monthDayOf — ohne Browser gilt der Kalendertag der App-Zone", () => {
   afterEach(() => setAppTimeZone(DEFAULT_TIME_ZONE))
 
   it("ohne gesetzte Zone bleibt es beim UTC-Kalendertag (Standardzone, Mitternachts-Grenzfall)", () => {

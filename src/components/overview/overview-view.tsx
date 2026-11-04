@@ -4,7 +4,7 @@ import { useState, useEffect } from "react"
 import { format } from "date-fns"
 import { ChevronRight } from "lucide-react"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { toZonedDate } from "@/lib/timezone"
+import { deviceTodayDate, deviceTodayKey } from "@/lib/timezone"
 import type { JournalStats } from "@/types/journal"
 import { realIDBAdapter } from "@/lib/sync/idb"
 import { idbToStats } from "@/lib/sync/idb-to-views"
@@ -27,6 +27,8 @@ export async function loadOverviewStats(
   const getAllEntries = deps.getAllEntries ?? (() => realIDBAdapter.getAllEntries())
   const params = new URLSearchParams()
   if (journalId) params.set("journalId", journalId)
+  // Serie und „An diesem Tag“ zählen ab dem Tag des Geräts, auf Reisen ist das oft nicht der der App-Zone.
+  params.set("today", deviceTodayKey())
   try {
     const res = await fetchImpl(`/api/stats?${params}`)
     // A 503 (honest DB-failure answer) carries an {error} body, not stats —
@@ -67,7 +69,7 @@ export function OverviewView({ journalId, refreshNonce = 0, onOpenOnThisDay }: O
     }
   }, [journalId, refreshNonce])
 
-  const todayLabel = format(toZonedDate(new Date()), messages.date.dayMonthLong, { locale: getDateFnsLocale(locale) })
+  const todayLabel = format(deviceTodayDate(), messages.date.dayMonthLong, { locale: getDateFnsLocale(locale) })
 
   return (
     <ScrollArea className="flex-1">

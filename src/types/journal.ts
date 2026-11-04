@@ -174,7 +174,7 @@ export interface CalendarDayData {
 export type CalendarData = Record<string, CalendarDayData>
 
 export interface JournalStats {
-  streak: number         // consecutive days with entries ending today
+  streak: number         // consecutive days with entries, back from the device's day (see streakLength)
   totalEntries: number
   totalMedia: number | null // null = unknown (offline fallback has no media metadata)
   totalDays: number      // unique days with at least one entry

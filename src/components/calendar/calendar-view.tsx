@@ -14,7 +14,7 @@ import type { CalendarData, TimelineEntry } from "@/types/journal"
 import { realIDBAdapter } from "@/lib/sync/idb"
 import { idbToCalendarData } from "@/lib/sync/idb-to-views"
 import { loadDayFull } from "@/lib/timeline/day-entries"
-import { toZonedDate } from "@/lib/timezone"
+import { deviceTodayDate } from "@/lib/timezone"
 
 /** Obergrenze der Monatsraster (wie bisher) — zugleich Zeitraum des Tageszähler-Requests. */
 export const MAX_MONTHS = 24
@@ -62,10 +62,9 @@ interface CalendarViewProps {
 
 export function CalendarView({ journalId, selectedDate, onDaySelect }: CalendarViewProps) {
   const { messages, locale } = useI18n()
-  // App-Zone statt Gerätezeit: toZonedDate liefert ein Date mit den Wanduhr-
-  // Feldern der Zone, damit localDateKey (lokale Felder) den Kalendertag der
-  // App-Zone trägt — sonst wichen "heute" und die Monatsgrenzen von der Zone ab.
-  const today = useMemo(() => toZonedDate(new Date()), [])
+  // "Heute" aus Sicht des Geräts, wie Zeitleiste und Übersicht: Das Date trägt den
+  // Tag in seinen lokalen Feldern, damit localDateKey ihn liest.
+  const today = useMemo(() => deviceTodayDate(), [])
   const startMonth = useMemo(() => subMonths(startOfMonth(today), MAX_MONTHS - 1), [today])
   // Months from current going backwards — newest first; only the current window is mounted
   const [monthCount, setMonthCount] = useState(INITIAL_MONTHS)

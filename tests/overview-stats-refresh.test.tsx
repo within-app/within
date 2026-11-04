@@ -52,13 +52,13 @@ describe("loadOverviewStats — network first, IDB fallback", () => {
     const fetchImpl = vi.fn().mockResolvedValue({ ok: true, json: async () => SERVER_STATS })
     const result = await loadOverviewStats("j1", { fetchImpl: fetchImpl as unknown as typeof fetch })
     expect(result).toEqual(SERVER_STATS)
-    expect(fetchImpl).toHaveBeenCalledWith("/api/stats?journalId=j1")
+    expect(fetchImpl).toHaveBeenCalledWith(expect.stringMatching(/^\/api\/stats\?journalId=j1&today=\d{4}-\d{2}-\d{2}$/))
   })
 
   it("omits the journalId param for the all-journals view", async () => {
     const fetchImpl = vi.fn().mockResolvedValue({ ok: true, json: async () => SERVER_STATS })
     await loadOverviewStats(null, { fetchImpl: fetchImpl as unknown as typeof fetch })
-    expect(fetchImpl).toHaveBeenCalledWith("/api/stats?")
+    expect(fetchImpl).toHaveBeenCalledWith(expect.stringMatching(/^\/api\/stats\?today=\d{4}-\d{2}-\d{2}$/))
   })
 
   it("falls back to IDB-derived stats when the network fails", async () => {

@@ -24,7 +24,7 @@ import { useOfflinePins } from "@/hooks/use-offline-pins"
 import { getDateFnsLocale, getMessages } from "@/lib/i18n"
 import { DEFAULT_LOCALE, type Locale } from "@/lib/i18n/config"
 import { useI18n } from "@/components/locale-provider"
-import { dateKey, shiftDateKey, zonedParts, zoneOf } from "@/lib/timezone"
+import { deviceTodayKey, shiftDateKey, zonedParts, zoneOf } from "@/lib/timezone"
 
 /** Jahr im Kalender des Eintrags, nicht das UTC-Jahr des Zeitstempels. */
 function entryYear(entry: { createdAt: string; timeZone?: string | null }): number {
@@ -32,15 +32,15 @@ function entryYear(entry: { createdAt: string; timeZone?: string | null }): numb
 }
 
 // ── Pure Tages-Anker-Helfer — exported for unit testing ─────────────────────
-// Der Anker ist ein Kalendertag ohne Zeitpunkt (yyyy-MM-dd, App-Zone —
-// Standard UTC), wie month_day_in serverseitig und idbToStats clientseitig.
+// Der Anker ist ein Kalendertag ohne Zeitpunkt (yyyy-MM-dd) aus Sicht des Geräts,
+// wie die Zählung in der Übersicht (/api/stats und idbToStats).
 // Beim Blättern dient das aktuelle Jahr als Kalender: der 29.02. existiert
 // als eigener Tag nur, wenn das Ankerjahr ein Schaltjahr ist (beschlossene
 // Semantik).
 
-/** Heutiger Kalendertag der App-Zone als Anker. */
+/** Heutiger Kalendertag des Geräts als Anker. */
 export function todayAnchor(now: Date = new Date()): string {
-  return dateKey(now)
+  return deviceTodayKey(now)
 }
 
 /** Einen Kalendertag vor/zurück — rollt über Monats- und Jahresgrenzen. */

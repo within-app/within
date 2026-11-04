@@ -12,7 +12,7 @@ import type { SyncEntry } from "@/lib/sync/types"
 import type { CalendarData, FullTimelineEntry, JournalEntryDetail, JournalStats, MapMarker, TimelineEntry } from "@/types/journal"
 import { extractTitle } from "@/lib/format"
 import { toTimelineEntry, weatherOf } from "@/lib/sync/idb-to-timeline"
-import { dateKey, monthDay as monthDayIn, streakLength, zoneOf } from "@/lib/timezone"
+import { dateKey, deviceTodayKey, monthDay as monthDayIn, streakLength, zoneOf } from "@/lib/timezone"
 // ── Entry detail ──────────────────────────────────────────────────────────
 
 /**
@@ -105,8 +105,8 @@ export function idbToStats(
 
   const daySet = new Set(filtered.map((e) => dateKey(new Date(e.createdAt), zoneOf(e.timeZone))))
 
-  const now = new Date()
-  const streak = streakLength(daySet, dateKey(now))
+  const today = deviceTodayKey()
+  const streak = streakLength(daySet, today)
 
   // Countries: last comma-separated segment of locationName, matching the SQL
   // REGEXP_REPLACE(location_name, '^.*,\s*', '') used server-side.
@@ -118,8 +118,8 @@ export function idbToStats(
     }
   }
 
-  // on-this-day: entries whose MM-DD matches today (App-Zone)
-  const todayMonthDay = monthDayIn(now)
+  // on-this-day: entries whose MM-DD matches the device's day
+  const todayMonthDay = today.slice(5)
   const onThisDayCount = filtered.filter(
     (e) => monthDayIn(new Date(e.createdAt), zoneOf(e.timeZone)) === todayMonthDay
   ).length

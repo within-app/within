@@ -1,6 +1,6 @@
 {
   "name": "within",
-  "version": "1.3.0",
+  "version": "1.3.1",
   "description": "Self-hosted private journal — your entries stay in your home network",
   "private": true,
   "license": "AGPL-3.0-only",
