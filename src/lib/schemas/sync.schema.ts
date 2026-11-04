@@ -5,6 +5,7 @@ const SyncEntrySchema = z.object({
   journalId:            z.string().uuid(),
   text:                 z.string().max(100_000).default(""),
   createdAt:            z.string().datetime(),
+  timeZone:             z.string().max(100).nullable().optional(),
   updatedAt:            z.string().datetime(),
   revisionId:           z.string().uuid(),
   starred:              z.boolean().default(false),

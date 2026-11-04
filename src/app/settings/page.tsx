@@ -1013,7 +1013,7 @@ function ImportSection({ journals }: { journals: Journal[] }) {
         {status === "done" && result && (
           <div className="flex items-start gap-3 rounded-lg border border-green-200 bg-green-50 dark:border-green-900 dark:bg-green-950/30 p-4 text-sm">
             <CheckCircle2 className="h-5 w-5 text-green-600 dark:text-green-400 shrink-0 mt-0.5" />
-            <div className="space-y-1">
+            <div className="min-w-0 space-y-1">
               <p className="font-medium text-green-800 dark:text-green-300">
                 {m.doneIn((result.duration / 1000).toFixed(1))}
               </p>
@@ -1025,7 +1025,7 @@ function ImportSection({ journals }: { journals: Journal[] }) {
                   <summary className="cursor-pointer text-yellow-700 dark:text-yellow-400">
                     {m.errorCount(result.errors.length)}
                   </summary>
-                  <ul className="mt-1 space-y-0.5 font-mono text-xs text-yellow-700 dark:text-yellow-400">
+                  <ul className="mt-1 max-h-64 space-y-0.5 overflow-y-auto break-words font-mono text-xs text-yellow-700 dark:text-yellow-400">
                     {result.errors.map((e, i) => <li key={i}>{e}</li>)}
                   </ul>
                 </details>
@@ -1035,7 +1035,7 @@ function ImportSection({ journals }: { journals: Journal[] }) {
                   <summary className="cursor-pointer text-yellow-700 dark:text-yellow-400">
                     {m.warningCount(result.warnings.length)}
                   </summary>
-                  <ul className="mt-1 space-y-0.5 font-mono text-xs text-yellow-700 dark:text-yellow-400">
+                  <ul className="mt-1 max-h-64 space-y-0.5 overflow-y-auto break-words font-mono text-xs text-yellow-700 dark:text-yellow-400">
                     {result.warnings.map((w, i) => <li key={i}>{w}</li>)}
                   </ul>
                 </details>

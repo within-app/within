@@ -19,6 +19,7 @@ export async function GET(req: NextRequest) {
          e.location_lng  AS lng,
          e.text,
          e.created_at,
+         e.time_zone,
          j.color         AS journal_color
        FROM entries e
        JOIN journals j ON j.id = e.journal_id
@@ -39,6 +40,7 @@ export async function GET(req: NextRequest) {
         journalColor: r.journal_color,
         title: title || "Ohne Titel",
         createdAt: new Date(r.created_at).toISOString(),
+        timeZone: r.time_zone,
       }
     })
 

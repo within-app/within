@@ -1,10 +1,10 @@
 /**
- * Eine Zeitzone für die ganze App (APP_TIMEZONE, IANA-Name, Standard UTC).
+ * App-Zone (APP_TIMEZONE, IANA-Name, Standard UTC) und Zone je Eintrag.
  *
  * Einträge werden als exakter Zeitpunkt gespeichert (TIMESTAMPTZ). Alles, was
  * daraus einen *Kalendertag* macht — Zeitleiste, Kalender, „An diesem Tag“,
- * Statistiken, Uhrzeit-Anzeige — läuft über diese Helfer und damit über genau
- * eine Zone. Vorher: Server bucketete in UTC, der Browser zeigte Ortszeit —
+ * Statistiken, Uhrzeit-Anzeige — läuft über diese Helfer: in der Zone des
+ * Eintrags (zoneOf), ohne Angabe in der App-Zone. Vorher: Server bucketete in UTC, der Browser zeigte Ortszeit —
  * ein Abendeintrag westlich von UTC landete unter dem nächsten Tag.
  *
  * Server: die Zone kommt aus process.env.APP_TIMEZONE (validiert in env.ts).
@@ -40,6 +40,39 @@ export function getAppTimeZone(): string {
 /** Ungültige Zonen werden ignoriert — der Server hat bereits validiert. */
 export function setAppTimeZone(tz: string): void {
   if (isValidTimeZone(tz)) appTimeZone = tz
+}
+
+const knownZones = new Map<string, boolean>()
+
+/**
+ * Zone eines Eintrags: seine eigene, ohne Angabe die App-Zone. Kennt dieses
+ * Gerät den Namen nicht (ältere Zeitzonendaten im Browser), gilt ebenfalls die
+ * App-Zone; formatToParts würde sonst die ganze Ansicht sprengen.
+ */
+export function zoneOf(tz?: string | null): string {
+  if (!tz) return getAppTimeZone()
+  let known = knownZones.get(tz)
+  if (known === undefined) {
+    known = isValidTimeZone(tz)
+    knownZones.set(tz, known)
+  }
+  return known ? tz : getAppTimeZone()
+}
+
+/** Zone des Geräts, für neue Einträge. Null, wenn der Browser keine nennt. */
+export function deviceTimeZone(): string | null {
+  const tz = Intl.DateTimeFormat().resolvedOptions().timeZone
+  return isValidTimeZone(tz) ? tz : null
+}
+
+/**
+ * Heute aus Sicht des Geräts, für „Heute“ und „Gestern“: Tagesansicht und Eintrag
+ * müssen dasselbe sagen, auch wenn Gerät, Eintrag und App-Zone auseinanderliegen.
+ * Auf dem Server gibt es kein Gerät, dort gilt die App-Zone.
+ */
+export function deviceTodayKey(): string {
+  const tz = typeof window === "undefined" ? getAppTimeZone() : deviceTimeZone() ?? getAppTimeZone()
+  return dateKey(new Date(), tz)
 }
 
 export interface ZonedParts {
@@ -129,6 +162,22 @@ export function shiftDateKey(key: string, days: number): string {
   const [y, m, d] = key.split("-").map(Number)
   const shifted = new Date(Date.UTC(y, m - 1, d + days))
   return `${shifted.getUTCFullYear()}-${pad(shifted.getUTCMonth() + 1)}-${pad(shifted.getUTCDate())}`
+}
+
+/**
+ * Serie: aufeinanderfolgende Tage bis zum letzten Eintrag. Gestern gilt als
+ * Start, solange heute noch nichts steht. Morgen zählt auch, weil ein Eintrag
+ * östlich der App-Zone dort schon am nächsten Tag stehen kann; die längere Kette
+ * gewinnt, damit ein einzeln auf morgen datierter Eintrag die Serie nicht abwertet.
+ */
+export function streakLength(days: Set<string>, todayKey: string): number {
+  const chainFrom = (start: string) => {
+    let length = 0
+    while (days.has(shiftDateKey(start, -length))) length++
+    return length
+  }
+  const current = chainFrom(days.has(todayKey) ? todayKey : shiftDateKey(todayKey, -1))
+  return Math.max(current, chainFrom(shiftDateKey(todayKey, 1)))
 }
 
 export interface WallClock {

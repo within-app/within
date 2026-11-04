@@ -6,7 +6,7 @@ import { CloudAlert, CloudOff, FileText, ImageOff, Loader2, Play, Music, Video }
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { cn } from "@/lib/utils"
 import { formatDuration } from "@/lib/format"
-import { toZonedDate } from "@/lib/timezone"
+import { toZonedDate, zoneOf } from "@/lib/timezone"
 import { getDateFnsLocale } from "@/lib/i18n"
 import { useI18n } from "@/components/locale-provider"
 import type { PaginatedMedia, MediaItem, Media } from "@/types/journal"
@@ -304,7 +304,7 @@ export function MediaGridView({
 
 export function PhotoTile({ item, onClick }: { item: MediaItem; onClick: () => void }) {
   const { messages, locale } = useI18n()
-  const dateLabel = format(toZonedDate(new Date(item.createdAt)), messages.date.dayMonthShort, { locale: getDateFnsLocale(locale) })
+  const dateLabel = format(toZonedDate(new Date(item.createdAt), zoneOf(item.timeZone)), messages.date.dayMonthShort, { locale: getDateFnsLocale(locale) })
   const gallery = messages.detail.gallery
   // Das aria-label des Buttons verdeckt den Badge-Text für Screenreader —
   // der Zustand muss deshalb mit ins Label, nicht nur ins Bild.
@@ -374,7 +374,7 @@ export function PhotoTile({ item, onClick }: { item: MediaItem; onClick: () => v
 
 function VideoTile({ item, onClick }: { item: MediaItem; onClick: () => void }) {
   const { messages, locale } = useI18n()
-  const dateLabel = format(toZonedDate(new Date(item.createdAt)), messages.date.dayMonthShort, { locale: getDateFnsLocale(locale) })
+  const dateLabel = format(toZonedDate(new Date(item.createdAt), zoneOf(item.timeZone)), messages.date.dayMonthShort, { locale: getDateFnsLocale(locale) })
   const hasPoster = !!item.thumbnailPath
   const hasLoop = !!item.previewPath
 
@@ -458,7 +458,7 @@ function VideoTile({ item, onClick }: { item: MediaItem; onClick: () => void }) 
  */
 export function PdfTile({ item, onClick }: { item: MediaItem; onClick: () => void }) {
   const { messages, locale } = useI18n()
-  const dateLabel = format(toZonedDate(new Date(item.createdAt)), messages.date.dayMonthShort, { locale: getDateFnsLocale(locale) })
+  const dateLabel = format(toZonedDate(new Date(item.createdAt), zoneOf(item.timeZone)), messages.date.dayMonthShort, { locale: getDateFnsLocale(locale) })
   const name = item.originalName ?? messages.detail.pdf.fallbackName
 
   return (
@@ -503,7 +503,7 @@ export function PdfTile({ item, onClick }: { item: MediaItem; onClick: () => voi
 
 function AudioTile({ item, onClick }: { item: MediaItem; onClick: () => void }) {
   const { messages, locale } = useI18n()
-  const dateLabel = format(toZonedDate(new Date(item.createdAt)), messages.date.dayMonthShort, { locale: getDateFnsLocale(locale) })
+  const dateLabel = format(toZonedDate(new Date(item.createdAt), zoneOf(item.timeZone)), messages.date.dayMonthShort, { locale: getDateFnsLocale(locale) })
   const ext = item.filePath.split(".").pop()?.toUpperCase() ?? "AUDIO"
 
   return (

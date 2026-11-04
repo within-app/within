@@ -136,6 +136,12 @@ nice -n 19 ionice -c 3 -n 7 \
   pg_restore --dbname="${DATABASE_URL}" --no-acl --no-owner "${DUMP_FILE}"
 log "database restored"
 
+# An older dump predates entries.time_zone. Every query reads that column, so
+# without it the app fails on all routes until its next restart. Right here,
+# not after the media copy, which can take long on a big journal.
+psql "${DATABASE_URL}" -v ON_ERROR_STOP=1 \
+  -c "ALTER TABLE entries ADD COLUMN IF NOT EXISTS time_zone TEXT" > /dev/null
+
 # Media: the mirror replaces the media folder completely (no merge). The
 # mirror always holds the state of the LAST backup, whichever dump was chosen.
 # --chown: files written by root or copied from a drive without unix

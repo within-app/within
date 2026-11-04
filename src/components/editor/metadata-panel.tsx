@@ -34,6 +34,7 @@ interface MetadataPanelProps {
   journalId: string
   onJournalChange: (id: string) => void
   createdAt: Date
+  timeZone?: string | null
   onDateChange: (date: Date) => void
   starred: boolean
   onStarredChange: (starred: boolean) => void
@@ -52,6 +53,7 @@ export function MetadataPanel({
   journalId,
   onJournalChange,
   createdAt,
+  timeZone,
   onDateChange,
   starred,
   onStarredChange,
@@ -77,17 +79,17 @@ export function MetadataPanel({
 
   // Datum und Uhrzeit sind Wanduhr-Felder der App-Zone (src/lib/editor/entry-date.ts),
   // nicht der Gerätezeitzone — sonst weicht der Editor von Zeitleiste und Detail ab.
-  const wallClock = entryWallClockDate(createdAt)
-  const timeString = entryTimeString(createdAt)
+  const wallClock = entryWallClockDate(createdAt, timeZone)
+  const timeString = entryTimeString(createdAt, timeZone)
 
   function handleTimeChange(value: string) {
-    const next = withEntryTime(createdAt, value)
+    const next = withEntryTime(createdAt, value, timeZone)
     if (next) onDateChange(next)
   }
 
   function handleDaySelect(day: Date | undefined) {
     if (!day) return
-    onDateChange(withEntryDay(createdAt, day))
+    onDateChange(withEntryDay(createdAt, day, timeZone))
     setCalendarOpen(false)
   }
 

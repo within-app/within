@@ -390,7 +390,7 @@ export function MapView({ journalId, selectedEntryId, onEntrySelect }: MapViewPr
           <div className="bg-popover/95 text-popover-foreground rounded-xl shadow-md border border-border/40 backdrop-blur-sm px-3 py-2 text-xs max-w-[200px]">
             <p className="font-semibold leading-snug truncate text-[12px]">{tooltip.marker.title}</p>
             <p className="text-muted-foreground mt-0.5 text-[11px]">
-              {formatEntryDate(tooltip.marker.createdAt, locale)}
+              {formatEntryDate(tooltip.marker.createdAt, locale, tooltip.marker.timeZone)}
             </p>
           </div>
         </div>

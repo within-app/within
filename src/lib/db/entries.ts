@@ -54,6 +54,7 @@ interface EntryRow {
   has_audio: boolean
   has_video: boolean
   tags: string[]
+  time_zone: string | null
   /** Nur vorhanden, wenn includeMedia gesetzt war. */
   media_json?: MediaJsonRow[]
 }
@@ -103,9 +104,9 @@ export async function listEntries(
     `SELECT COUNT(*)::int AS total FROM entries e
      WHERE e.deleted_at IS NULL
        AND ($1::uuid IS NULL OR e.journal_id = $1::uuid)
-       AND ($2::date IS NULL OR DATE(e.created_at AT TIME ZONE $10) = $2::date)
-       AND ($3::text IS NULL OR month_day_in(e.created_at, $10) = $3::text)
-       AND ($4::int  IS NULL OR EXTRACT(YEAR FROM e.created_at AT TIME ZONE $10)::int = $4::int)
+       AND ($2::date IS NULL OR DATE(e.created_at AT TIME ZONE COALESCE(e.time_zone, $10)) = $2::date)
+       AND ($3::text IS NULL OR month_day_in(e.created_at, COALESCE(e.time_zone, $10)) = $3::text)
+       AND ($4::int  IS NULL OR EXTRACT(YEAR FROM e.created_at AT TIME ZONE COALESCE(e.time_zone, $10))::int = $4::int)
        AND ($5::text IS NULL OR to_tsvector('german', e.text) @@ websearch_to_tsquery('german', $5::text))
        AND ($6::text[] IS NULL OR EXISTS (
              SELECT 1 FROM entry_tags et2 JOIN tags t2 ON t2.id = et2.tag_id
@@ -116,7 +117,10 @@ export async function listEntries(
              SELECT 1 FROM media m2
              WHERE m2.entry_id = e.id AND ($8::text = 'any' OR m2.type = $8::text)
            ))
-       AND ($9::text IS NULL OR e.created_at < ((($9::text || '-01')::date + INTERVAL '1 month') AT TIME ZONE $10))`,
+       AND ($9::text IS NULL OR (
+             e.created_at < ((($9::text || '-01')::date + INTERVAL '1 month') AT TIME ZONE $10) + INTERVAL '2 days'
+             AND DATE(e.created_at AT TIME ZONE COALESCE(e.time_zone, $10)) < ($9::text || '-01')::date + INTERVAL '1 month'
+           ))`,
     [journalId, date, onThisDay, year, searchQuery, tags, starred, mediaType, before, tz]
   )
 
@@ -126,6 +130,7 @@ export async function listEntries(
        e.journal_id,
        j.color         AS journal_color,
        e.created_at,
+       e.time_zone,
        e.text,
        e.starred,
        e.location_name,
@@ -146,9 +151,9 @@ export async function listEntries(
      JOIN journals j ON j.id = e.journal_id
      WHERE e.deleted_at IS NULL
        AND ($1::uuid IS NULL OR e.journal_id = $1::uuid)
-       AND ($4::date IS NULL OR DATE(e.created_at AT TIME ZONE $12) = $4::date)
-       AND ($5::text IS NULL OR month_day_in(e.created_at, $12) = $5::text)
-       AND ($6::int  IS NULL OR EXTRACT(YEAR FROM e.created_at AT TIME ZONE $12)::int = $6::int)
+       AND ($4::date IS NULL OR DATE(e.created_at AT TIME ZONE COALESCE(e.time_zone, $12)) = $4::date)
+       AND ($5::text IS NULL OR month_day_in(e.created_at, COALESCE(e.time_zone, $12)) = $5::text)
+       AND ($6::int  IS NULL OR EXTRACT(YEAR FROM e.created_at AT TIME ZONE COALESCE(e.time_zone, $12))::int = $6::int)
        AND ($7::text IS NULL OR to_tsvector('german', e.text) @@ websearch_to_tsquery('german', $7::text))
        AND ($8::text[] IS NULL OR EXISTS (
              SELECT 1 FROM entry_tags et2 JOIN tags t2 ON t2.id = et2.tag_id
@@ -159,7 +164,10 @@ export async function listEntries(
              SELECT 1 FROM media m2
              WHERE m2.entry_id = e.id AND ($10::text = 'any' OR m2.type = $10::text)
            ))
-       AND ($11::text IS NULL OR e.created_at < ((($11::text || '-01')::date + INTERVAL '1 month') AT TIME ZONE $12))
+       AND ($11::text IS NULL OR (
+             e.created_at < ((($11::text || '-01')::date + INTERVAL '1 month') AT TIME ZONE $12) + INTERVAL '2 days'
+             AND DATE(e.created_at AT TIME ZONE COALESCE(e.time_zone, $12)) < ($11::text || '-01')::date + INTERVAL '1 month'
+           ))
      ORDER BY e.created_at DESC, e.id DESC
      LIMIT $2 OFFSET $3`,
     [journalId, perPage, offset, date, onThisDay, year, searchQuery, tags, starred, mediaType, before, tz]

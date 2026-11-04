@@ -37,7 +37,10 @@
 //     pairs the old worker with the new bundle and the map stays blank
 //     (seen on the desktop after the 09.09. deploy; a device with fresh
 //     caches was fine). Exactly the case the v6 note asks a bump for.
-const SHELL_VER = 'v10';
+//   v11: API responses and IDB entries carry timeZone (zone per entry), and the
+//     sync engine's schema version moved to 3. Old HTML booting old chunks would
+//     create entries without a zone and flip the version back on every switch.
+const SHELL_VER = 'v11';
 const SHELL_CACHE = `within-shell-${SHELL_VER}`;
 const STATIC_CACHE = `within-static-${SHELL_VER}`;
 // v1 held plaintext photos and is purged by the activate cleanup (it is

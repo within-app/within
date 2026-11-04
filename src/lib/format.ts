@@ -1,24 +1,25 @@
 import { format } from "date-fns"
 import { getDateFnsLocale, getMessages, localeTag } from "@/lib/i18n"
 import { DEFAULT_LOCALE, type Locale } from "@/lib/i18n/config"
-import { dateKey, getAppTimeZone, shiftDateKey, timeHHmm, toZonedDate, zonedParts } from "@/lib/timezone"
+import { dateKey, deviceTodayKey, shiftDateKey, timeHHmm, toZonedDate, zonedParts, zoneOf } from "@/lib/timezone"
 
-export function formatEntryDate(isoString: string, locale: Locale = DEFAULT_LOCALE): string {
+export function formatEntryDate(isoString: string, locale: Locale = DEFAULT_LOCALE, timeZone?: string | null): string {
   const date = new Date(isoString)
+  const tz = zoneOf(timeZone)
   const m = getMessages(locale)
-  // Heute/Gestern über den Kalendertag der App-Zone entscheiden — Timeline
-  // und Datums-Header gruppieren danach (dateKey/formatEntryCardDate). Mit
+  // Der Tag des Eintrags gegen das Heute des Geräts — Timeline und Datums-Header
+  // gruppieren nach dem Tag des Eintrags (dateKey/formatEntryCardDate). Mit
   // dem lokalen isToday() zeigte die Detailansicht nach lokaler Mitternacht
   // "Heute" für einen Eintrag, der in der Timeline unter dem Vortages-Header steht.
-  const key = dateKey(date)
-  const todayKey = dateKey(new Date())
+  const key = dateKey(date, tz)
+  const todayKey = deviceTodayKey()
   if (key === todayKey) return m.date.today
   if (key === shiftDateKey(todayKey, -1)) return m.date.yesterday
-  return format(toZonedDate(date), m.date.long, { locale: getDateFnsLocale(locale) })
+  return format(toZonedDate(date, tz), m.date.long, { locale: getDateFnsLocale(locale) })
 }
 
-export function formatEntryTime(isoString: string): string {
-  return timeHHmm(new Date(isoString))
+export function formatEntryTime(isoString: string, timeZone?: string | null): string {
+  return timeHHmm(new Date(isoString), zoneOf(timeZone))
 }
 
 export function stripMarkdown(text: string): string {
@@ -85,10 +86,11 @@ export function localDateKey(date: Date): string {
  */
 export function formatEntryCardDate(
   createdAt: string,
-  locale: Locale = DEFAULT_LOCALE
+  locale: Locale = DEFAULT_LOCALE,
+  timeZone?: string | null
 ): { weekdayAbbr: string; dayNum: string } {
   const d = new Date(createdAt)
-  const tz = getAppTimeZone()
+  const tz = zoneOf(timeZone)
   const weekdayAbbr = d
     .toLocaleDateString(localeTag(locale), { weekday: "short", timeZone: tz })
     .replace(/\./g, "")

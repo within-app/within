@@ -168,7 +168,7 @@ async function readEntryMeta(
     [...ids].map(async (entryId) => {
       try {
         const entry = await realIDBAdapter.getEntry(entryId)
-        if (entry) entries.set(entryId, { journalId: entry.journalId, createdAt: entry.createdAt })
+        if (entry) entries.set(entryId, { journalId: entry.journalId, createdAt: entry.createdAt, timeZone: entry.timeZone })
       } catch (err) {
         // Unknown, not fatal: the tile falls back to queuedAt and skips the filter.
         console.error("[within/pending-media] reading the entry of a waiting file failed:", err)

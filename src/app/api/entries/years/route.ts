@@ -10,7 +10,7 @@ export async function GET(req: NextRequest) {
   try {
     const { db } = await import("@/lib/db")
     const { rows } = await db.query(
-      `SELECT EXTRACT(YEAR FROM created_at AT TIME ZONE $2)::int AS year,
+      `SELECT EXTRACT(YEAR FROM created_at AT TIME ZONE COALESCE(time_zone, $2))::int AS year,
               COUNT(*)::int AS count
        FROM entries
        WHERE deleted_at IS NULL

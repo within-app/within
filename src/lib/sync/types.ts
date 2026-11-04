@@ -9,6 +9,8 @@ export interface SyncEntry {
   journalId: string
   text: string
   createdAt: string   // ISO 8601
+  /** IANA-Zone, in der der Eintrag entstand; ohne Angabe gilt die App-Zone. */
+  timeZone?: string | null
   updatedAt: string   // ISO 8601 — used for last-writer-wins
   revisionId: string  // UUID — changes on every server write
   starred: boolean

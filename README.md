@@ -394,12 +394,14 @@ To reinstall from scratch:
 
 Within reads Day One's export. In Day One choose *Export → JSON*, which gives you a ZIP. Then in Within open *Settings → Import* and select that ZIP.
 
-- **Expected format:** a ZIP with one or more `.json` files at the top level and media in `photos/`, `videos/`, `audios/` and `pdfs/` folders.
-- **What comes across:** text, creation and modification dates, tags, favourites, location and weather data, the original entry ID, and all photos, videos and PDF attachments (with their file names).
-- **What does not:** audio memos from Day One exports are not imported yet.
+- **Size limit:** one ZIP may be at most 100 MB, and no single file in it larger than that. A bigger journal does not fit yet: export it from Day One in smaller parts and import them one after the other. Entries Within already knows are skipped.
+- **Expected format:** a ZIP with exactly one `.json` file at the top level, so one journal per ZIP, and media in `photos/`, `videos/`, `audios/` and `pdfs/` folders.
+- **What comes across:** text, creation and modification dates, the time zone of each entry (it decides which day the entry belongs to and which clock time is shown), tags, favourites, location and weather data, the original entry ID, all photos, videos and PDF attachments (with their file names), and audio memos.
+- **Videos and memos:** the preview image of a video is made during the import, its short moving preview follows in the background. Memos are checked like uploads: anything that is not audio is skipped and listed under the import result.
+- **Other devices** catch up by themselves: on their next sync after an import they download everything again, nothing to reset by hand.
 - **Photos are checked like uploads:** the import only takes JPEG, PNG, WebP and GIF — Within looks at the file itself, not its name. Anything else (HEIC/AVIF, TIFF, …) is skipped and listed under the import result so you can convert and add those pictures by hand. On a Mac: select the HEIC files in Finder → right-click → *Quick Actions* → *Convert Image* → JPEG.
 
-Large journals are imported in batches; the page shows progress and you can keep the tab open in the background.
+Keep the tab open until the result appears.
 
 ## Everyday things worth knowing
 

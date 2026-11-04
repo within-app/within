@@ -29,7 +29,7 @@ export async function GET(req: NextRequest) {
       `SELECT m.id, m.entry_id, m.type, m.file_path,
               m.thumbnail_path, m.preview_path, m.duration_seconds,
               m.client_media_id, m.original_name, m.size_bytes,
-              e.created_at, j.color AS journal_color
+              e.created_at, e.time_zone, j.color AS journal_color
        FROM media m
        JOIN entries e ON e.id = m.entry_id
        JOIN journals j ON j.id = e.journal_id
@@ -54,6 +54,7 @@ export async function GET(req: NextRequest) {
       // while its outbox record still exists. Bounded small column.
       clientMediaId: r.client_media_id ?? null,
       createdAt: new Date(r.created_at).toISOString(),
+      timeZone: r.time_zone,
       journalColor: r.journal_color,
     }))
 

@@ -71,6 +71,7 @@ export function idbToMediaItems(
           // dort bleibt die Dublette vorerst eine offene Grenze.
           clientMediaId: m.clientMediaId,
           createdAt: entry.createdAt,
+          timeZone: entry.timeZone ?? null,
           journalColor: "",
         })
       }
@@ -89,6 +90,7 @@ export function idbToMediaItems(
           filePath: m.thumbUrl,
           thumbnailPath: m.thumbUrl,
           createdAt: entry.createdAt,
+          timeZone: entry.timeZone ?? null,
           journalColor: "",
         })
       }
@@ -109,6 +111,7 @@ export function idbToMediaItems(
         filePath: entry.thumbnailDataUrl,
         thumbnailPath: entry.thumbnailDataUrl,
         createdAt: entry.createdAt,
+        timeZone: entry.timeZone ?? null,
         journalColor: "",
       })
     }

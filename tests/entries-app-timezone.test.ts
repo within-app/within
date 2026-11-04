@@ -74,8 +74,8 @@ describe("listEntries — App-Zone als expliziter Parameter", () => {
     const { listEntries } = await import("@/lib/db/entries")
     await listEntries({ ...DEFAULTS, onThisDay: "12-31" })
 
-    expect(sqls[0]).toContain("month_day_in(e.created_at, $10)")
-    expect(sqls[1]).toContain("month_day_in(e.created_at, $12)")
+    expect(sqls[0]).toContain("month_day_in(e.created_at, COALESCE(e.time_zone, $10))")
+    expect(sqls[1]).toContain("month_day_in(e.created_at, COALESCE(e.time_zone, $12))")
     expect(sqls[0]).not.toContain("month_day_utc")
     expect(sqls[1]).not.toContain("month_day_utc")
   })

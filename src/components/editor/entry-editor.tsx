@@ -33,6 +33,7 @@ import { realIDBAdapter } from "@/lib/sync/idb"
 import { isEntryQueuedLocally } from "@/lib/sync/queue-status"
 import { useI18n } from "@/components/locale-provider"
 import type { Journal, JournalEntryDetail, Tag } from "@/types/journal"
+import { deviceTimeZone } from "@/lib/timezone"
 
 /** Renders a SaveResult error in the active UI language; falls back to the
  *  German legacy text for results without a key. */
@@ -75,6 +76,8 @@ export function EntryEditor({ initialEntry, journals, defaultJournalId, defaultT
   // Editor state
   const [text, setText] = useState(initialEntry?.text ?? defaultText ?? "")
   const [journalId, setJournalId] = useState(initialEntry?.journalId ?? defaultId)
+  // Ein neuer Eintrag merkt sich die Zone des Geräts, ein bestehender behält seine.
+  const [timeZone] = useState<string | null>(() => (initialEntry ? initialEntry.timeZone ?? null : deviceTimeZone()))
   const [createdAt, setCreatedAt] = useState<Date>(
     initialEntry?.createdAt ? new Date(initialEntry.createdAt) : new Date()
   )
@@ -155,6 +158,7 @@ export function EntryEditor({ initialEntry, journals, defaultJournalId, defaultT
       text,
       journalId,
       createdAt: createdAt.toISOString(),
+      timeZone,
       starred,
       tags: tags.map((t) => t.name),
       photos: photos
@@ -174,7 +178,7 @@ export function EntryEditor({ initialEntry, journals, defaultJournalId, defaultT
       // Pass the revision the client loaded so the PUT handler can detect concurrent sync conflicts.
       clientRevisionId: initialEntry?.revisionId,
     }
-  }, [text, journalId, createdAt, starred, tags, photos, locationName, locationLat, locationLng, initialEntry])
+  }, [text, journalId, createdAt, timeZone, starred, tags, photos, locationName, locationLat, locationLng, initialEntry])
 
   /** Id the entry will carry — allocated on demand for offline attachments. */
   const ensureEntryId = useCallback(() => {
@@ -438,6 +442,7 @@ export function EntryEditor({ initialEntry, journals, defaultJournalId, defaultT
                   journalId={journalId}
                   onJournalChange={setJournalId}
                   createdAt={createdAt}
+                  timeZone={timeZone}
                   onDateChange={setCreatedAt}
                   starred={starred}
                   onStarredChange={setStarred}
@@ -467,6 +472,7 @@ export function EntryEditor({ initialEntry, journals, defaultJournalId, defaultT
             journalId={journalId}
             onJournalChange={setJournalId}
             createdAt={createdAt}
+            timeZone={timeZone}
             onDateChange={setCreatedAt}
             starred={starred}
             onStarredChange={setStarred}

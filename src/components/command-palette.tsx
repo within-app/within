@@ -7,7 +7,7 @@ import {
   Sun, Moon, Monitor, Search,
 } from "lucide-react"
 import { format } from "date-fns"
-import { toZonedDate } from "@/lib/timezone"
+import { toZonedDate, zoneOf } from "@/lib/timezone"
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog"
 import {
   Command,
@@ -226,12 +226,12 @@ export function CommandPalette({
                       <Search className="h-4 w-4" />
                       <span>
                         {entry.title ||
-                          format(toZonedDate(new Date(entry.createdAt)), messages.date.dayMonthYear, {
+                          format(toZonedDate(new Date(entry.createdAt), zoneOf(entry.timeZone)), messages.date.dayMonthYear, {
                             locale: getDateFnsLocale(locale),
                           })}
                       </span>
                       <span className="ml-auto text-[11px] text-muted-foreground opacity-60">
-                        {format(toZonedDate(new Date(entry.createdAt)), messages.date.numericShort, {
+                        {format(toZonedDate(new Date(entry.createdAt), zoneOf(entry.timeZone)), messages.date.numericShort, {
                           locale: getDateFnsLocale(locale),
                         })}
                       </span>

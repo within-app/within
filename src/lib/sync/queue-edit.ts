@@ -25,6 +25,7 @@ export interface OfflineEditorPayload {
   text: string
   journalId: string
   createdAt: string
+  timeZone?: string | null
   starred: boolean
   tags: string[]
   photos: Array<{ filePath: string; thumbnailPath?: string | null }>
@@ -69,6 +70,7 @@ export function buildQueuedEdit({
     journalId: payload.journalId,
     text: payload.text,
     createdAt: payload.createdAt,
+    timeZone: payload.timeZone ?? null,
     updatedAt: queuedAt,
     revisionId: safeUUID(),
     starred: payload.starred,

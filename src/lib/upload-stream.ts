@@ -35,6 +35,22 @@ export async function saveBodyToDisk(
 }
 
 /**
+ * Reads a body to its end and throws the bytes away, one chunk at a time. For
+ * answers that store nothing: replying while the client still sends gets the
+ * connection cut at Caddy (WebKit over HTTP/2 sees the status but cannot read the
+ * answer, HTTP/1.1 clients get a reset). Never rejects, a client that broke off
+ * reads no answer anyway. The size gate in the route has already run.
+ */
+export async function discardBody(body: ReadableStream<Uint8Array>): Promise<void> {
+  try {
+    const reader = body.getReader()
+    while (!(await reader.read()).done) { /* discard */ }
+  } catch {
+    // client gone
+  }
+}
+
+/**
  * Reads the first `bytes` of a file — for content checks that need only the
  * header (PDF magic). Opens, reads one small buffer, closes; never the file.
  */

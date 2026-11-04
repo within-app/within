@@ -34,7 +34,7 @@ const PAGE_LIMIT = 50
 // Bump when the sync protocol adds new fields that must be backfilled for
 // existing entries. A mismatch triggers a one-time full pull (since=epoch)
 // so pre-existing IDB entries receive the new field (e.g. thumbnailDataUrl).
-const SCHEMA_VERSION = "2"
+const SCHEMA_VERSION = "3"
 
 /** User-facing sync error texts — injected so the UI language applies; German
  *  defaults keep the engine self-contained for tests and legacy callers. */

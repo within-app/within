@@ -24,7 +24,12 @@ import { useOfflinePins } from "@/hooks/use-offline-pins"
 import { getDateFnsLocale, getMessages } from "@/lib/i18n"
 import { DEFAULT_LOCALE, type Locale } from "@/lib/i18n/config"
 import { useI18n } from "@/components/locale-provider"
-import { dateKey, shiftDateKey } from "@/lib/timezone"
+import { dateKey, shiftDateKey, zonedParts, zoneOf } from "@/lib/timezone"
+
+/** Jahr im Kalender des Eintrags, nicht das UTC-Jahr des Zeitstempels. */
+function entryYear(entry: { createdAt: string; timeZone?: string | null }): number {
+  return zonedParts(new Date(entry.createdAt), zoneOf(entry.timeZone)).year
+}
 
 // ── Pure Tages-Anker-Helfer — exported for unit testing ─────────────────────
 // Der Anker ist ein Kalendertag ohne Zeitpunkt (yyyy-MM-dd, App-Zone —
@@ -306,7 +311,7 @@ export function OnThisDayEntries({
         <OnThisDayEntry
           key={entry.id}
           entry={withVisibleMedia(entry, online, pinnedIds?.has(entry.id) ?? true)}
-          showYearHeader={entry.createdAt.slice(0, 4) !== (i > 0 ? entries[i - 1].createdAt.slice(0, 4) : null)}
+          showYearHeader={entryYear(entry) !== (i > 0 ? entryYear(entries[i - 1]) : null)}
           onOpen={onOpen ? () => onOpen(entry.id) : undefined}
         />
       ))}
@@ -342,7 +347,7 @@ export function OnThisDayEntry({
       {showYearHeader && (
         <div className="flex items-center gap-3 pt-10 pb-2">
           <span className="text-3xl font-bold tabular-nums leading-none text-foreground">
-            {entry.createdAt.slice(0, 4)}
+            {entryYear(entry)}
           </span>
           <div className="flex-1 h-px bg-border" />
         </div>
@@ -356,7 +361,7 @@ export function OnThisDayEntry({
               style={{ backgroundColor: entry.journalColor }}
             />
             <time className="text-xs font-ui font-medium uppercase tracking-widest text-muted-foreground truncate">
-              {formatEntryDate(entry.createdAt, locale)} · {formatEntryTime(entry.createdAt)}
+              {formatEntryDate(entry.createdAt, locale, entry.timeZone)} · {formatEntryTime(entry.createdAt, entry.timeZone)}
             </time>
             {pending && (
               <span className="flex items-center gap-1 text-[10.5px] text-primary/70 shrink-0" aria-label={messages.timeline.entryCard.pending}>

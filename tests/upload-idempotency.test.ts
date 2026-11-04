@@ -270,3 +270,67 @@ describe("upload route — Existenz-Check vor Platten-Schreiben", () => {
     expect(mockRm).toHaveBeenCalledOnce()
   })
 })
+
+// ── Frühe Antworten erst nach dem Body ─────────────────────────────────
+//
+// Antwortet der Server, während das Gerät noch sendet, schneidet Caddy die Leitung
+// ab: WebKit sieht über HTTP/2 den Status, kann den Inhalt aber nicht mehr lesen
+// oder hängt beim Lesen (flushMedia wartet dort), HTTP/1.1-Clients bekommen einen
+// Verbindungsabbruch. Belegt im Lauf gegen den Dev-Stack mit Caddy.
+
+describe("upload route — Antwort erst, wenn der Body gelesen ist", () => {
+  function reqWithTrackedBody(params: string, fail = false) {
+    const state = { pulled: 0, finished: false }
+    const body = new ReadableStream<Uint8Array>({
+      pull(c) {
+        state.pulled++
+        if (fail) { c.error(new Error("Client hat abgebrochen")); return }
+        if (state.pulled <= 3) { c.enqueue(new Uint8Array(1024)); return }
+        state.finished = true
+        c.close()
+      },
+    }, { highWaterMark: 0 })
+    const req = new NextRequest(`http://localhost/api/upload?${params}`, {
+      method: "POST",
+      headers: { "content-type": "audio/mpeg", "content-length": String(3 * 1024) },
+      body,
+      duplex: "half",
+    } as ConstructorParameters<typeof NextRequest>[1])
+    return { req, state }
+  }
+  const known = { id: EXISTING_MEDIA_ID, type: "audio", file_path: "/media/synth/existing.mp3", thumbnail_path: null }
+
+  it("vorhandene clientMediaId: 201 erst nach dem Lesen, nichts auf der Platte", async () => {
+    seedDb({ existingByClientId: known })
+    const { req, state } = reqWithTrackedBody(`entryId=${ENTRY_ID}&clientMediaId=${CLIENT_MEDIA_ID}`)
+    const res = await POST(req)
+    expect(res.status).toBe(201)
+    expect(state.finished).toBe(true)
+    expect(mockMkdir).not.toHaveBeenCalled()
+    expect(mockSaveBodyToDisk).not.toHaveBeenCalled()
+  })
+
+  it("Eintrag fehlt: 409 erst nach dem Lesen", async () => {
+    seedDb({ entryRow: null })
+    const { req, state } = reqWithTrackedBody(`entryId=${ENTRY_ID}`)
+    const res = await POST(req)
+    expect(res.status).toBe(409)
+    expect(state.finished).toBe(true)
+  })
+
+  it("Eintrag gelöscht: 410 erst nach dem Lesen", async () => {
+    seedDb({ entryRow: { deleted_at: "2026-07-27T10:00:00.000Z" } })
+    const { req, state } = reqWithTrackedBody(`entryId=${ENTRY_ID}`)
+    const res = await POST(req)
+    expect(res.status).toBe(410)
+    expect(state.finished).toBe(true)
+  })
+
+  it("bricht der Client beim Lesen ab, bleibt es bei der Antwort und es wird nichts geschrieben", async () => {
+    seedDb({ existingByClientId: known })
+    const { req } = reqWithTrackedBody(`entryId=${ENTRY_ID}&clientMediaId=${CLIENT_MEDIA_ID}`, true)
+    const res = await POST(req)
+    expect(res.status).toBe(201)
+    expect(mockSaveBodyToDisk).not.toHaveBeenCalled()
+  })
+})

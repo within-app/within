@@ -14,7 +14,7 @@ import {
   type UploadMediaType,
 } from "@/lib/upload-security"
 import { extractPoster, generateLoopClip, probeDuration, probeMediaStreams } from "@/lib/video-thumbnail"
-import { saveBodyToDisk, readFileHead, UploadTooLargeError } from "@/lib/upload-stream"
+import { saveBodyToDisk, readFileHead, discardBody, UploadTooLargeError } from "@/lib/upload-stream"
 import { guardApiRequest } from "@/lib/request-guard"
 import type { Pool } from "pg"
 
@@ -214,6 +214,7 @@ export async function POST(req: NextRequest) {
         )
         if (existing) {
           // Retry of an upload whose response got lost — the row is already there.
+          await discardBody(body)
           return NextResponse.json(
             {
               id: existing.id,
@@ -235,6 +236,7 @@ export async function POST(req: NextRequest) {
       if (!entryRow) {
         // Entry not pushed yet — retryable, same meaning as 201 without id,
         // but without stacking an orphaned file copy on disk per attempt.
+        await discardBody(body)
         return NextResponse.json(
           { error: "Eintrag ist serverseitig noch nicht vorhanden", code: "entry_missing" },
           { status: 409 }
@@ -242,6 +244,7 @@ export async function POST(req: NextRequest) {
       }
       if (entryRow.deleted_at) {
         // Entry deleted — the file has no home anymore; client drops the outbox item.
+        await discardBody(body)
         return NextResponse.json(
           { error: "Eintrag wurde gelöscht", code: "entry_deleted" },
           { status: 410 }

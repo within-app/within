@@ -12,7 +12,7 @@ import type { SyncEntry } from "@/lib/sync/types"
 import type { CalendarData, FullTimelineEntry, JournalEntryDetail, JournalStats, MapMarker, TimelineEntry } from "@/types/journal"
 import { extractTitle } from "@/lib/format"
 import { toTimelineEntry, weatherOf } from "@/lib/sync/idb-to-timeline"
-import { dateKey, monthDay as monthDayIn, shiftDateKey } from "@/lib/timezone"
+import { dateKey, monthDay as monthDayIn, streakLength, zoneOf } from "@/lib/timezone"
 // ── Entry detail ──────────────────────────────────────────────────────────
 
 /**
@@ -36,6 +36,7 @@ export function idbToEntryDetail(entry: SyncEntry): JournalEntryDetail {
     journalId: entry.journalId,
     text: entry.text,
     createdAt: entry.createdAt,
+    timeZone: entry.timeZone ?? null,
     updatedAt: entry.updatedAt,
     revisionId: entry.revisionId,
     starred: entry.starred,
@@ -77,7 +78,7 @@ export function idbToCalendarData(
   for (const e of entries) {
     if (e.deletedAt) continue
     if (journalId && e.journalId !== journalId) continue
-    const day = dateKey(new Date(e.createdAt))
+    const day = dateKey(new Date(e.createdAt), zoneOf(e.timeZone))
     if (result[day]) {
       result[day].count++
     } else {
@@ -102,19 +103,10 @@ export function idbToStats(
     ? entries.filter((e) => e.journalId === journalId)
     : entries
 
-  const daySet = new Set(filtered.map((e) => dateKey(new Date(e.createdAt))))
+  const daySet = new Set(filtered.map((e) => dateKey(new Date(e.createdAt), zoneOf(e.timeZone))))
 
-  // Streak: consecutive days with entries, ending today (App-Zone)
-  let streak = 0
   const now = new Date()
-  const todayKey = dateKey(now)
-  for (let i = 0; i < 3650; i++) {
-    if (daySet.has(shiftDateKey(todayKey, -i))) {
-      streak++
-    } else {
-      break
-    }
-  }
+  const streak = streakLength(daySet, dateKey(now))
 
   // Countries: last comma-separated segment of locationName, matching the SQL
   // REGEXP_REPLACE(location_name, '^.*,\s*', '') used server-side.
@@ -129,7 +121,7 @@ export function idbToStats(
   // on-this-day: entries whose MM-DD matches today (App-Zone)
   const todayMonthDay = monthDayIn(now)
   const onThisDayCount = filtered.filter(
-    (e) => monthDayIn(new Date(e.createdAt)) === todayMonthDay
+    (e) => monthDayIn(new Date(e.createdAt), zoneOf(e.timeZone)) === todayMonthDay
   ).length
 
   return {
@@ -164,7 +156,7 @@ export function idbToOnThisDayFull(
   monthDay: string,
   journalId: string | null
 ): FullTimelineEntry[] {
-  return idbToFullEntries(entries, (e) => monthDayIn(new Date(e.createdAt)) === monthDay, journalId)
+  return idbToFullEntries(entries, (e) => monthDayIn(new Date(e.createdAt), zoneOf(e.timeZone)) === monthDay, journalId)
 }
 
 /** Tages-Vorschau: ein Kalendertag der App-Zone (YYYY-MM-DD). */
@@ -173,7 +165,7 @@ export function idbToDayFull(
   dateStr: string,
   journalId: string | null
 ): FullTimelineEntry[] {
-  return idbToFullEntries(entries, (e) => dateKey(new Date(e.createdAt)) === dateStr, journalId)
+  return idbToFullEntries(entries, (e) => dateKey(new Date(e.createdAt), zoneOf(e.timeZone)) === dateStr, journalId)
 }
 
 // ── Map ───────────────────────────────────────────────────────────────────
@@ -201,6 +193,7 @@ export function idbToMapMarkers(
         journalColor: "",
         title: title || "Ohne Titel",
         createdAt: e.createdAt,
+        timeZone: e.timeZone ?? null,
       }
     })
 }

@@ -20,7 +20,7 @@ export async function GET(
     // ── Load entry ──────────────────────────────────────────────────────
     const { rows: [entry] } = await db.query(
       `SELECT
-         e.id, e.journal_id, e.text, e.created_at, e.updated_at, e.starred,
+         e.id, e.journal_id, e.text, e.created_at, e.time_zone, e.updated_at, e.starred,
          e.location_name, e.location_lat, e.location_lng,
          e.weather_description, e.weather_temp_celsius, e.weather_icon,
          j.name AS journal_name, j.color AS journal_color
@@ -92,6 +92,7 @@ export async function GET(
           journalId: entry.journal_id,
           text: entry.text ?? "",
           createdAt: new Date(entry.created_at).toISOString(),
+          timeZone: entry.time_zone,
           updatedAt: new Date(entry.updated_at).toISOString(),
           starred: entry.starred,
           ...buildExportLocationWeather(entry),

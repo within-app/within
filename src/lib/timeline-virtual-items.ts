@@ -6,7 +6,7 @@
 import { format, parseISO } from "date-fns"
 import { getDateFnsLocale } from "@/lib/i18n"
 import { DEFAULT_LOCALE, type Locale } from "@/lib/i18n/config"
-import { dateKey } from "@/lib/timezone"
+import { dateKey, zoneOf } from "@/lib/timezone"
 import type { DateGroup, TimelineEntry } from "@/types/journal"
 
 export type FlatItem =
@@ -29,7 +29,7 @@ export function timelineTargets(items: FlatItem[]): TimelineTarget[] {
   const out: TimelineTarget[] = []
   for (const item of items) {
     if (item.kind === "entry") {
-      out.push({ kind: "entry", id: item.entry.id, date: dateKey(new Date(item.entry.createdAt)) })
+      out.push({ kind: "entry", id: item.entry.id, date: dateKey(new Date(item.entry.createdAt), zoneOf(item.entry.timeZone)) })
     } else if (item.kind === "day") {
       out.push({ kind: "day", date: item.group.date, entries: item.group.entries })
     }

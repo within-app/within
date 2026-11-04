@@ -6,7 +6,8 @@ import { CreateEntrySchema, EntryQuerySchema } from "@/lib/schemas/entry.schema"
 import { readJsonBody, validationError } from "@/lib/schemas"
 import { logError, logWarn } from "@/lib/logger"
 import { listEntries } from "@/lib/db/entries"
-import { dateKey } from "@/lib/timezone"
+import { dateKey, zoneOf } from "@/lib/timezone"
+import { acceptedTimeZone } from "@/lib/db/time-zone"
 
 export async function POST(req: NextRequest) {
   const rawBody = await readJsonBody(req)
@@ -21,14 +22,16 @@ export async function POST(req: NextRequest) {
   const { db } = await import("@/lib/db")
   const client = await db.connect()
   try {
+    // Vor BEGIN: eine abgelehnte Zone bräche die Transaktion sonst ab.
+    const timeZone = await acceptedTimeZone(client, body.timeZone)
     await client.query("BEGIN")
 
     const { rows: [entry] } = await client.query(
       `INSERT INTO entries
          (journal_id, text, created_at, updated_at, starred,
           location_name, location_lat, location_lng,
-          weather_description, weather_temp_celsius, weather_icon)
-       VALUES ($1,$2,$3,NOW(),$4,$5,$6,$7,$8,$9,$10)
+          weather_description, weather_temp_celsius, weather_icon, time_zone)
+       VALUES ($1,$2,$3,NOW(),$4,$5,$6,$7,$8,$9,$10,$11)
        RETURNING id`,
       [
         journalId,
@@ -41,6 +44,7 @@ export async function POST(req: NextRequest) {
         body.weatherDescription ?? null,
         body.weatherTempCelsius ?? null,
         body.weatherIcon ?? null,
+        timeZone,
       ]
     )
 
@@ -121,10 +125,10 @@ export async function GET(req: NextRequest) {
       includeMedia: full,
     })
 
-    // Group by day in the app zone (Zeitzone P2)
+    // Group by the entry's own day, app zone without one
     const dateMap = new Map<string, TimelineEntry[]>()
     for (const row of rows) {
-      const key = dateKey(new Date(row.created_at))
+      const key = dateKey(new Date(row.created_at), zoneOf(row.time_zone))
       if (!dateMap.has(key)) dateMap.set(key, [])
       const { title: entryTitle, body: entryBody } = extractTitle(row.text ?? "")
       const entry: TimelineEntry = {
@@ -132,6 +136,7 @@ export async function GET(req: NextRequest) {
         journalId: row.journal_id,
         journalColor: row.journal_color,
         createdAt: new Date(row.created_at).toISOString(),
+        timeZone: row.time_zone,
         title: entryTitle,
         previewText: truncateText(stripMarkdown(entryBody || row.text)),
         thumbnail: row.thumbnail ?? undefined,

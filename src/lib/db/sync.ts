@@ -8,6 +8,7 @@ import type { PoolClient } from "pg"
 import { deleteOrphanTags, replaceEntryTags } from "@/lib/db/tags"
 import type { SyncEntry } from "@/lib/sync/types"
 import { safeMediaPath } from "@/lib/media-security"
+import { acceptedTimeZone } from "@/lib/db/time-zone"
 
 export interface ChangesPage {
   entries: SyncEntry[]
@@ -45,6 +46,7 @@ export async function getChangesSince(
     journal_id: string
     text: string
     created_at: Date
+    time_zone: string | null
     updated_at: Date
     revision_id: string
     starred: boolean
@@ -65,6 +67,7 @@ export async function getChangesSince(
        e.journal_id,
        e.text,
        e.created_at,
+       e.time_zone,
        e.updated_at,
        e.updated_at::text AS updated_at_raw,
        e.revision_id,
@@ -119,6 +122,7 @@ export async function getChangesSince(
       journalId: r.journal_id,
       text: r.text,
       createdAt: new Date(r.created_at).toISOString(),
+      timeZone: r.time_zone,
       updatedAt: new Date(r.updated_at).toISOString(),
       revisionId: r.revision_id,
       starred: r.starred,
@@ -176,6 +180,9 @@ export async function upsertEntries(entries: SyncEntry[]): Promise<UpsertResult>
   // Tags, die Einträge in diesem Batch verloren haben — nach dem COMMIT einmal
   // auf Waisen geprüft (lib/db/tags.ts), nicht pro Eintrag in der Transaktion.
   const removedTagIds: string[] = []
+  // Vor BEGIN: eine abgelehnte Zone bräche die Transaktion sonst ab.
+  const zones = new Map<string, string | null>()
+  for (const entry of entries) zones.set(entry.id, await acceptedTimeZone(db, entry.timeZone))
 
   const client = await db.connect()
   try {
@@ -197,6 +204,7 @@ export async function upsertEntries(entries: SyncEntry[]): Promise<UpsertResult>
            e.revision_id,
            e.text,
            e.created_at,
+           e.time_zone,
            e.starred,
            e.journal_id,
            e.location_name,
@@ -224,8 +232,8 @@ export async function upsertEntries(entries: SyncEntry[]): Promise<UpsertResult>
           `INSERT INTO entries
              (id, journal_id, text, created_at, updated_at, revision_id, starred,
               location_name, location_lat, location_lng,
-              weather_description, weather_temp_celsius, weather_icon)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+              weather_description, weather_temp_celsius, weather_icon, time_zone)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
            ON CONFLICT (id) DO NOTHING`,
           [
             entry.id, entry.journalId, entry.text ?? "",
@@ -233,6 +241,7 @@ export async function upsertEntries(entries: SyncEntry[]): Promise<UpsertResult>
             entry.starred ?? false,
             entry.locationName ?? null, entry.locationLat ?? null, entry.locationLng ?? null,
             entry.weatherDescription ?? null, entry.weatherTempCelsius ?? null, entry.weatherIcon ?? null,
+            zones.get(entry.id) ?? null,
           ]
         )
         // ?? 1: echtes pg setzt rowCount immer; nur ein explizites 0 ist der Race-Fall.
@@ -293,7 +302,8 @@ export async function upsertEntries(entries: SyncEntry[]): Promise<UpsertResult>
              journal_id = $2, text = $3, created_at = $4, updated_at = $5,
              revision_id = $6, starred = $7,
              location_name = $8, location_lat = $9, location_lng = $10,
-             weather_description = $11, weather_temp_celsius = $12, weather_icon = $13
+             weather_description = $11, weather_temp_celsius = $12, weather_icon = $13,
+             time_zone = COALESCE($14, time_zone)
            WHERE id = $1`,
           [
             entry.id, entry.journalId, entry.text ?? "",
@@ -301,6 +311,8 @@ export async function upsertEntries(entries: SyncEntry[]): Promise<UpsertResult>
             entry.starred ?? false,
             entry.locationName ?? null, entry.locationLat ?? null, entry.locationLng ?? null,
             entry.weatherDescription ?? null, entry.weatherTempCelsius ?? null, entry.weatherIcon ?? null,
+            // An older cached app sends no zone: keep the stored one.
+            zones.get(entry.id) ?? null,
           ]
         )
         removedTagIds.push(...(await replaceEntryTags(client, entry.id, entry.tags)))
@@ -311,6 +323,7 @@ export async function upsertEntries(entries: SyncEntry[]): Promise<UpsertResult>
           revision_id: entry.revisionId,
           text: entry.text,
           created_at: new Date(entry.createdAt),
+          time_zone: zones.get(entry.id) ?? null,
           starred: entry.starred,
           journal_id: entry.journalId,
           location_name: entry.locationName ?? null,
@@ -329,6 +342,7 @@ export async function upsertEntries(entries: SyncEntry[]): Promise<UpsertResult>
             journalId: server.journal_id,
             text: server.text,
             createdAt: new Date(server.created_at).toISOString(),
+            timeZone: server.time_zone,
             updatedAt: new Date(server.updated_at).toISOString(),
             revisionId: server.revision_id,
             starred: server.starred,
@@ -364,6 +378,7 @@ interface ExistingEntryRow {
   revision_id: string
   text: string
   created_at: Date
+  time_zone: string | null
   starred: boolean
   journal_id: string
   location_name: string | null

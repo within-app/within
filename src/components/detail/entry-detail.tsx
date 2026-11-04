@@ -387,7 +387,7 @@ export function EntryDetail({ entryId, onBack, onEdit, reloadNonce = 0, onDelete
                 </div>
               </div>
               <time className={entryDetailEyebrowClasses()}>
-                {formatEntryDate(entry.createdAt, locale)} · {formatEntryTime(entry.createdAt)}
+                {formatEntryDate(entry.createdAt, locale, entry.timeZone)} · {formatEntryTime(entry.createdAt, entry.timeZone)}
               </time>
             </div>
 

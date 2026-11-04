@@ -2,6 +2,7 @@ export interface SavePayload {
   text: string
   journalId: string
   createdAt: string
+  timeZone?: string | null
   starred: boolean
   tags: string[]
   photos: Array<{ filePath?: string | null; thumbnailPath?: string | null }>

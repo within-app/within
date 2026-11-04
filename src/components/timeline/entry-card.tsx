@@ -50,12 +50,12 @@ interface EntryCardProps {
 
 export const EntryCard = memo(function EntryCard({ entry, isSelected, onSelect, showDate = false }: EntryCardProps) {
   const { messages, locale } = useI18n()
-  const { weekdayAbbr, dayNum } = formatEntryCardDate(entry.createdAt, locale)
+  const { weekdayAbbr, dayNum } = formatEntryCardDate(entry.createdAt, locale, entry.timeZone)
 
   const { id } = entry
   const handleClick = useCallback(() => onSelect?.(id), [onSelect, id])
 
-  const metaTime = formatEntryTime(entry.createdAt)
+  const metaTime = formatEntryTime(entry.createdAt, entry.timeZone)
 
   return (
     <button
@@ -185,7 +185,7 @@ export const DayCard = memo(function DayCard({ group, isSelected, onSelect }: Da
   const { messages, locale } = useI18n()
   const { entries, date } = group
   const first = entries[0]
-  const { weekdayAbbr, dayNum } = formatEntryCardDate(first.createdAt, locale)
+  const { weekdayAbbr, dayNum } = formatEntryCardDate(first.createdAt, locale, first.timeZone)
   const withPhoto = entries.find((e) => e.thumbnail)
   const photoCount = entries.reduce((n, e) => n + e.photoCount, 0)
   const shown = entries.slice(0, DAY_CARD_LINES)
@@ -227,7 +227,7 @@ export const DayCard = memo(function DayCard({ group, isSelected, onSelect }: Da
             {shown.map((e) => (
               <li key={e.id} className="flex items-baseline gap-[6px] min-w-0 text-[13.5px] leading-snug">
                 <span className="shrink-0 tabular-nums text-[11px] text-muted-foreground/65">
-                  {formatEntryTime(e.createdAt)}
+                  {formatEntryTime(e.createdAt, e.timeZone)}
                 </span>
                 <span className={cn(
                   "truncate",

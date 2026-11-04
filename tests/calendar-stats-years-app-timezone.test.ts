@@ -70,7 +70,7 @@ describe("GET /api/entries/years — App-Zone als expliziter Parameter", () => {
 
     expect(capturedParams[1]).toBe("America/New_York")
     expect(capturedSql).not.toContain("AT TIME ZONE 'UTC'")
-    expect(capturedSql).toMatch(/AT TIME ZONE \$\d+/)
+    expect(capturedSql).toMatch(/AT TIME ZONE COALESCE\(time_zone, \$\d+\)/)
   })
 })
 

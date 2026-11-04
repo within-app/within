@@ -24,6 +24,7 @@ const PdfSizeBytesSchema = z.number().int().nonnegative().max(2_147_483_647).nul
 
 export const CreateEntrySchema = z.object({
   text:      z.string().max(100_000).default(""),
+  timeZone:  z.string().max(100).nullable().optional(),
   journalId: z.string().uuid("journalId muss eine gültige UUID sein"),
   createdAt: z.string().datetime({ message: "createdAt muss ein ISO-8601-Datum sein" }).optional(),
   starred:   z.boolean().default(false),
@@ -39,6 +40,13 @@ export const CreateEntrySchema = z.object({
     sizeBytes:     PdfSizeBytesSchema,
   })).max(50).default([]),
 }).merge(LocationSchema).merge(WeatherSchema)
+
+export const TimeZoneBackfillSchema = z.object({
+  items: z.array(z.object({
+    id:       z.string().uuid(),
+    timeZone: z.string().max(100),
+  })).max(5000),
+})
 
 export const UpdateEntrySchema = z.object({
   text:             z.string().max(100_000).default(""),

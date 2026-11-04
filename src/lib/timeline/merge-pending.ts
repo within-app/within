@@ -9,7 +9,7 @@
 import type { DateGroup, TimelineEntry } from "@/types/journal"
 import type { QueuedEdit } from "@/lib/sync/types"
 import { toTimelineEntry } from "@/lib/sync/idb-to-timeline"
-import { dateKey } from "@/lib/timezone"
+import { dateKey, zoneOf } from "@/lib/timezone"
 
 /**
  * Returns a new DateGroup[] that includes all server entries plus any pending
@@ -70,7 +70,7 @@ export function mergePendingIntoDateGroups(
   }))
 
   for (const entry of toMerge) {
-    const key = dateKey(new Date(entry.createdAt))
+    const key = dateKey(new Date(entry.createdAt), zoneOf(entry.timeZone))
     const existing = merged.find((g) => g.date === key)
     if (existing) {
       // Pending entry goes first within the day (it's the newest local edit)

@@ -70,6 +70,7 @@ export interface JournalEntry {
   journalId: string
   text: string
   createdAt: string
+  timeZone?: string | null
   updatedAt: string
   revisionId?: string
   location?: LocationInfo
@@ -84,6 +85,7 @@ export interface TimelineEntry {
   journalId: string
   journalColor: string
   createdAt: string
+  timeZone?: string | null
   title: string
   previewText: string
   thumbnail?: string
@@ -139,6 +141,7 @@ export interface MediaItem {
   originalName?: string | null
   sizeBytes?: number | null
   createdAt: string
+  timeZone?: string | null
   journalColor: string
   /** The outbox id the file was uploaded under — same contract as on
    *  `Media`. Server rows carry it from `media.client_media_id`, synthetic
@@ -210,4 +213,5 @@ export interface MapMarker {
   journalColor: string
   title: string
   createdAt: string
+  timeZone?: string | null
 }

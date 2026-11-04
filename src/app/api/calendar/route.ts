@@ -33,14 +33,16 @@ export async function GET(req: NextRequest) {
          MAX(thumbnail) AS thumbnail
        FROM (
          SELECT
-           DATE(e.created_at AT TIME ZONE $4)::text AS day,
+           DATE(e.created_at AT TIME ZONE COALESCE(e.time_zone, $4))::text AS day,
            (SELECT m.thumbnail_path FROM media m
             WHERE m.entry_id = e.id AND m.type = 'photo'
             ORDER BY m.order_index LIMIT 1) AS thumbnail
          FROM entries e
          WHERE e.deleted_at IS NULL
-           AND e.created_at >= (to_date($1, 'YYYY-MM') AT TIME ZONE $4)
-           AND e.created_at < ((to_date($2, 'YYYY-MM') + INTERVAL '1 month') AT TIME ZONE $4)
+           AND e.created_at >= (to_date($1, 'YYYY-MM') AT TIME ZONE $4) - INTERVAL '2 days'
+           AND e.created_at < ((to_date($2, 'YYYY-MM') + INTERVAL '1 month') AT TIME ZONE $4) + INTERVAL '2 days'
+           AND DATE(e.created_at AT TIME ZONE COALESCE(e.time_zone, $4)) >= to_date($1, 'YYYY-MM')
+           AND DATE(e.created_at AT TIME ZONE COALESCE(e.time_zone, $4)) < to_date($2, 'YYYY-MM') + INTERVAL '1 month'
            AND ($3::uuid IS NULL OR e.journal_id = $3::uuid)
        ) sub
        GROUP BY day

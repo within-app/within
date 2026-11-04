@@ -121,6 +121,7 @@ export function withPendingTiles(items: MediaItem[], pending: MediaItem[]): Medi
 export interface PendingEntryMeta {
   journalId?: string | null
   createdAt?: string
+  timeZone?: string | null
 }
 
 /**
@@ -148,6 +149,7 @@ export function toPendingMediaItem(
     type: item.type,
     filePath: previewUrl,
     createdAt: meta?.createdAt ?? item.queuedAt,
+    timeZone: meta?.timeZone ?? null,
     journalColor: "",
     pending: true,
     clientMediaId: item.id,

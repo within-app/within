@@ -27,7 +27,7 @@ export async function GET(req: NextRequest) {
     // ── Load all entries ────────────────────────────────────────────────
     const { rows: entryRows } = await db.query(
       `SELECT
-         e.id, e.journal_id, e.text, e.created_at, e.updated_at, e.starred,
+         e.id, e.journal_id, e.text, e.created_at, e.time_zone, e.updated_at, e.starred,
          e.location_name, e.location_lat, e.location_lng,
          e.weather_description, e.weather_temp_celsius, e.weather_icon
        FROM entries e
@@ -127,6 +127,7 @@ export async function GET(req: NextRequest) {
           journalId: e.journal_id,
           text: e.text ?? "",
           createdAt: new Date(e.created_at).toISOString(),
+          timeZone: e.time_zone,
           updatedAt: new Date(e.updated_at).toISOString(),
           starred: e.starred,
           ...buildExportLocationWeather(e),

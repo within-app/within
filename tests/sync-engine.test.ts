@@ -228,7 +228,7 @@ describe("sync() — schema version backfill", () => {
       .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ locale: null }) }) // PR4: Auth-Probe (/api/settings)
       .mockResolvedValueOnce({ ok: true, json: async () => ({ entries: [], nextCursor: null, serverTime }) }))
     await createSyncEngine(idb).sync()
-    expect(await idb.getMeta("schemaVersion")).toBe("2")
+    expect(await idb.getMeta("schemaVersion")).toBe("3")
   })
 
   it("does NOT stamp schemaVersion when pull fails, so the next sync retries with a full pull", async () => {
@@ -241,7 +241,7 @@ describe("sync() — schema version backfill", () => {
 
   it("uses delta pull (lastSync) when schemaVersion already matches", async () => {
     const storedLastSync = "2026-07-01T10:00:00.000Z"
-    await idb.setMeta("schemaVersion", "2")
+    await idb.setMeta("schemaVersion", "3")
     await idb.setMeta("lastSync", storedLastSync)
     const fetchMock = vi.fn()
       .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ locale: null }) }) // PR4: Auth-Probe (/api/settings)
@@ -304,7 +304,7 @@ describe("sync() — Datenbestand-Kennung (datasetId)", () => {
 
   it("gleiche Kennung → kein Reset, Delta-Pull ab lastSync, Kennung bleibt", async () => {
     const { idb, log } = stubWithLog()
-    await idb.setMeta("schemaVersion", "2")
+    await idb.setMeta("schemaVersion", "3")
     await idb.setMeta("lastSync", storedLastSync)
     await idb.setMeta("datasetId", "ds-1")
     await idb.putEntry(makeSyncEntry("20000000-0000-4000-8000-000000000001"))
@@ -320,7 +320,7 @@ describe("sync() — Datenbestand-Kennung (datasetId)", () => {
 
   it("andere Kennung → Reihenfolge push, clear, Full-Pull ab Epoche, dann Stempel", async () => {
     const { idb, log } = stubWithLog()
-    await idb.setMeta("schemaVersion", "2")
+    await idb.setMeta("schemaVersion", "3")
     await idb.setMeta("lastSync", storedLastSync)
     await idb.setMeta("datasetId", "ds-1")
     const stale = makeSyncEntry("20000000-0000-4000-8000-000000000001")
@@ -354,7 +354,7 @@ describe("sync() — Datenbestand-Kennung (datasetId)", () => {
 
   it("Pull-Fehler nach Reset → kein Stempel; der nächste Sync wiederholt den Full-Pull", async () => {
     const { idb, log } = stubWithLog()
-    await idb.setMeta("schemaVersion", "2")
+    await idb.setMeta("schemaVersion", "3")
     await idb.setMeta("lastSync", storedLastSync)
     await idb.setMeta("datasetId", "ds-1")
     await idb.putEntry(makeSyncEntry("20000000-0000-4000-8000-000000000001"))
@@ -376,7 +376,7 @@ describe("sync() — Datenbestand-Kennung (datasetId)", () => {
 
   it("Kennung lokal unbekannt (erstes Mal) → nur stempeln, kein Reset, Delta-Pull", async () => {
     const { idb, log } = stubWithLog()
-    await idb.setMeta("schemaVersion", "2")
+    await idb.setMeta("schemaVersion", "3")
     await idb.setMeta("lastSync", storedLastSync)
     await idb.putEntry(makeSyncEntry("20000000-0000-4000-8000-000000000001"))
     const fetchMock = routedFetch(log, { datasetId: "ds-1" })
@@ -391,7 +391,7 @@ describe("sync() — Datenbestand-Kennung (datasetId)", () => {
 
   it("Server ohne Kennung (älterer Stand) → weder Stempel noch Reset", async () => {
     const { idb, log } = stubWithLog()
-    await idb.setMeta("schemaVersion", "2")
+    await idb.setMeta("schemaVersion", "3")
     await idb.setMeta("lastSync", storedLastSync)
     await idb.setMeta("datasetId", "ds-1")
     vi.stubGlobal("fetch", routedFetch(log, { datasetId: null }))
@@ -402,7 +402,7 @@ describe("sync() — Datenbestand-Kennung (datasetId)", () => {
 
   it("Push scheitert transient (503) → der gequeuete Eintrag bleibt nach dem Reset sichtbar und in der Queue", async () => {
     const { idb, log } = stubWithLog()
-    await idb.setMeta("schemaVersion", "2")
+    await idb.setMeta("schemaVersion", "3")
     await idb.setMeta("lastSync", storedLastSync)
     await idb.setMeta("datasetId", "ds-1")
     const stale = makeSyncEntry("20000000-0000-4000-8000-000000000001")
@@ -427,7 +427,7 @@ describe("sync() — Datenbestand-Kennung (datasetId)", () => {
   it("Medien-Cache-Schlüssel (entryMedia:<id>) werden beim Neuabgleich verworfen, auch ohne lokalen Vorgänger", async () => {
     const { entryMediaMetaKey } = await import("@/lib/sync/entry-media-cache")
     const { idb, log } = stubWithLog()
-    await idb.setMeta("schemaVersion", "2")
+    await idb.setMeta("schemaVersion", "3")
     await idb.setMeta("lastSync", storedLastSync)
     await idb.setMeta("datasetId", "ds-1")
     const entry = makeSyncEntry("20000000-0000-4000-8000-000000000001")
@@ -446,13 +446,13 @@ describe("sync() — Datenbestand-Kennung (datasetId)", () => {
     vi.stubGlobal("fetch", fetchMock)
     await createSyncEngine(idb).sync()
     expect(fetchMock.mock.calls.map((c) => String(c[0])).filter((u) => u.includes("/api/sync/changes"))).toHaveLength(1)
-    expect(await idb.getMeta("schemaVersion")).toBe("2")
+    expect(await idb.getMeta("schemaVersion")).toBe("3")
     expect(await idb.getMeta("datasetId")).toBe("ds-2")
   })
 
   it("Adapter ohne clearEntries (älterer Client-Code) → kein Absturz, Full-Pull und Stempel trotzdem", async () => {
     const idb = makeStubIDB()
-    await idb.setMeta("schemaVersion", "2")
+    await idb.setMeta("schemaVersion", "3")
     await idb.setMeta("lastSync", storedLastSync)
     await idb.setMeta("datasetId", "ds-1")
     const log: string[] = []

@@ -7,6 +7,9 @@ import { mapWeatherCode, toUUID, buildLocationName } from "@/lib/dayone-import"
 import { guardApiRequest } from "@/lib/request-guard"
 import { safeExtFromFormat, safeOriginalName, isPdfHeader, PDF_HEADER_BYTES } from "@/lib/upload-security"
 import { readFileHead } from "@/lib/upload-stream"
+import { acceptedTimeZone } from "@/lib/db/time-zone"
+import { rotateDatasetId } from "@/lib/db/dataset-id"
+import { extractPoster, generateLoopClip, probeDuration, probeMediaStreams } from "@/lib/video-thumbnail"
 
 export const maxDuration = 120 // allow up to 2 minutes for large imports
 // Pi-safe ceiling: DayOne real exports are ~28 MB; 100 MiB (104,857,600 bytes) gives
@@ -153,6 +156,36 @@ async function insertPdfBatch(
   )
 }
 
+/**
+ * Importierte Einträge behalten ihr altes updated_at, der Delta-Sync erreicht sie
+ * nie. Eine neue Kennung lässt jedes Gerät beim nächsten Sync vollständig abgleichen.
+ * Die Einträge sind hier schon committet: Ein Fehler ist nur noch eine Warnung, und
+ * sie steht vorn, damit sie in einer langen Liste nicht untergeht. Auch bei nur
+ * übersprungenen Einträgen rotieren: Brach ein früherer Lauf nach dem Commit ab, ist
+ * dieselbe Datei noch einmal der einzige Weg, die Geräte nachzuholen.
+ */
+async function rotateAfterImport(
+  client: Parameters<typeof rotateDatasetId>[0],
+  known: number,
+  warnings: string[]
+): Promise<void> {
+  if (known === 0) return
+  try {
+    await rotateDatasetId(client)
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    console.error("import: rotateDatasetId failed:", err)
+    warnings.unshift(
+      `Geräteabgleich nicht angestoßen (${msg}). Die Einträge sind gespeichert. Damit verbundene Geräte sie bekommen, dieselbe Datei noch einmal importieren.`
+    )
+  }
+}
+
+// Day One nennt format "aac", die Datei heißt aber .m4a: In dieser Reihenfolge suchen,
+// die Endung kommt damit aus dieser Liste, nie aus dem JSON.
+const DAY_ONE_AUDIO_EXTS = ["m4a", "aac", "mp3"] as const
+
+const DAY_ONE_VIDEO_EXTS = ["mov", "mp4", "m4v"] as const
 
 export async function POST(req: NextRequest) {
   // Outside the proxy matcher (body must stream) — guard here, same functions.
@@ -289,6 +322,7 @@ export async function POST(req: NextRequest) {
         }
 
         // ── 1. Existence check — pool query, no connection held ──────────
+        let timeZoneV1: string | null
         try {
           const { rows: existV1 } = await dbV1.query(
             `SELECT id FROM entries WHERE id = $1`, [entry.id]
@@ -297,6 +331,9 @@ export async function POST(req: NextRequest) {
             skippedV1++
             continue
           }
+          // Here, before any file moves and outside the transaction: a database
+          // error only fails this entry, and a refused zone cannot abort BEGIN.
+          timeZoneV1 = await acceptedTimeZone(dbV1, entry.timeZone)
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err)
           errorsV1.push(`${entry.id}: ${msg}`)
@@ -466,7 +503,15 @@ export async function POST(req: NextRequest) {
         }
 
         // ── 3. Transaction — DB writes only ──────────────────────────────
-        const clientV1 = await dbV1.connect()
+        // Fails this entry only: entries committed before it still need the rotation below.
+        let clientV1
+        try {
+          clientV1 = await dbV1.connect()
+        } catch (err) {
+          for (const f of writtenV1) await unlink(f).catch(() => {})
+          errorsV1.push(`${entry.id}: ${err instanceof Error ? err.message : String(err)}`)
+          continue
+        }
         try {
           await clientV1.query("BEGIN")
 
@@ -478,8 +523,8 @@ export async function POST(req: NextRequest) {
             `INSERT INTO entries
                (id, journal_id, text, created_at, updated_at, starred,
                 location_name, location_lat, location_lng,
-                weather_description, weather_temp_celsius, weather_icon)
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+                weather_description, weather_temp_celsius, weather_icon, time_zone)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
              ON CONFLICT (id) DO NOTHING`,
             [
               entry.id,
@@ -494,6 +539,7 @@ export async function POST(req: NextRequest) {
               wxV1?.description ?? null,
               wxV1?.temperatureCelsius != null ? Math.round(wxV1.temperatureCelsius) : null,
               wxV1?.icon ?? null,  // DIRECT — icon is already the final WeatherIcon value
+              timeZoneV1,
             ]
           )
           if ((insV1.rowCount ?? 1) === 0) {
@@ -582,11 +628,13 @@ export async function POST(req: NextRequest) {
         }
       }
 
+      await rotateAfterImport(dbV1, importedV1 + skippedV1, warningsV1)
+
       return NextResponse.json({
         imported: importedV1,
         skipped: skippedV1,
-        errors: errorsV1.slice(0, 20),
-        warnings: warningsV1.slice(0, 20),
+        errors: errorsV1,
+        warnings: warningsV1,
         duration: Date.now() - start,
       })
     }
@@ -640,6 +688,7 @@ export async function POST(req: NextRequest) {
       const entryId = toUUID(entry.uuid)
 
       // ── 1. Existence check — pool query, no connection held ───────────────
+      let timeZone: string | null
       try {
         const { rows: existing } = await db.query(
           `SELECT id FROM entries WHERE id = $1`, [entryId]
@@ -648,6 +697,9 @@ export async function POST(req: NextRequest) {
           skipped++
           continue
         }
+        // Here, before any file moves and outside the transaction: a database
+        // error only fails this entry, and a refused zone cannot abort BEGIN.
+        timeZone = await acceptedTimeZone(db, entry.timeZone)
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err)
         errors.push(`${entry.uuid}: ${msg}`)
@@ -657,8 +709,18 @@ export async function POST(req: NextRequest) {
       // ── 2. File I/O — outside transaction, no connection held ─────────────
       const allWrittenFiles: string[] = []
       const photoBatch: { filePath: string; thumbPath: string; orderIdx: number }[] = []
-      const videoBatch: { filePath: string; orderIdx: number; duration: number | null }[] = []
+      const videoBatch: {
+        filePath: string
+        thumbPath: string | null
+        orderIdx: number
+        duration: number | null
+        origFsPath: string
+        loopFsPath: string
+        loopWebPath: string
+      }[] = []
       const pdfBatch: PdfBatchRow[] = []
+      const audioBatch: { filePath: string; orderIdx: number; duration: number | null }[] = []
+      let insertedVideos: { id: string; file_path: string }[] = []
       let fileIoErr: string | null = null
 
       try {
@@ -695,20 +757,40 @@ export async function POST(req: NextRequest) {
               warnings.push(`${entry.uuid}: Datei fehlt im ZIP: ${zipPath}`)
               continue
             }
+            // Same trust boundary as the upload, before ffmpeg touches the file:
+            // the extension from a fixed list, the content checked by ffprobe.
+            const ext = DAY_ONE_VIDEO_EXTS.find((e) => e === video.type.toLowerCase())
+            if (!ext || await probeMediaStreams(tempPath, "video") === "invalid") {
+              warnings.push(`${entry.uuid}: Übersprungen, keine Videodatei: ${zipPath}`)
+              continue
+            }
 
             const mediaUuid = crypto.randomUUID()
             const dir = join(process.cwd(), "public", "media", mediaUuid)
             await mkdir(dir, { recursive: true })
-            const origName = `${mediaUuid}-original.${video.type}`
+            const origName = `${mediaUuid}-original.${ext}`
             const finalOrigPath = join(dir, origName)
 
             await moveFile(tempPath, finalOrigPath)
             allWrittenFiles.push(finalOrigPath)
 
+            // Same as the upload: one awaited frame, null on ffmpeg failure, the
+            // video still comes along. Listed up front, ffmpeg may leave a partial file.
+            const posterName = `${mediaUuid}-poster.webp`
+            const posterFsPath = join(dir, posterName)
+            allWrittenFiles.push(posterFsPath)
+            const poster = await extractPoster(finalOrigPath, posterFsPath)
+            if (!poster) await unlink(posterFsPath).catch(() => {})
+
+            const loopName = `${mediaUuid}-loop.webp`
             videoBatch.push({
               filePath: `/media/${mediaUuid}/${origName}`,
+              thumbPath: poster ? `/media/${mediaUuid}/${posterName}` : null,
               orderIdx: video.orderInEntry ?? 0,
               duration: video.duration ? Math.round(video.duration) : null,
+              origFsPath: finalOrigPath,
+              loopFsPath: join(dir, loopName),
+              loopWebPath: `/media/${mediaUuid}/${loopName}`,
             })
           }
         }
@@ -740,6 +822,44 @@ export async function POST(req: NextRequest) {
             })
           }
         }
+
+        if (entry.audios && entry.audios.length > 0) {
+          const sortedAudios = [...entry.audios].sort(
+            (a, b) => (a.orderInEntry ?? 0) - (b.orderInEntry ?? 0)
+          )
+          for (const audio of sortedAudios) {
+            const ext = DAY_ONE_AUDIO_EXTS.find((e) => diskFiles.has(`audios/${audio.md5}.${e}`))
+            if (!ext) {
+              warnings.push(`${entry.uuid}: Datei fehlt im ZIP: audios/${audio.md5}.${DAY_ONE_AUDIO_EXTS[0]}`)
+              continue
+            }
+            const zipPath = `audios/${audio.md5}.${ext}`
+            const tempPath = diskFiles.get(zipPath)!
+            // Before any mkdir/rename, so a rejected file leaves nothing behind.
+            // "unknown" (no ffprobe, timeout) stays fail-open like the upload.
+            if ((await probeMediaStreams(tempPath, "audio")) === "invalid") {
+              warnings.push(`${entry.uuid}: Übersprungen, keine Audiodatei: ${zipPath}`)
+              continue
+            }
+
+            const mediaUuid = crypto.randomUUID()
+            const dir = join(process.cwd(), "public", "media", mediaUuid)
+            await mkdir(dir, { recursive: true })
+            const origName = `${mediaUuid}-original.${ext}`
+            const finalOrigPath = join(dir, origName)
+            await moveFile(tempPath, finalOrigPath)
+            allWrittenFiles.push(finalOrigPath)
+
+            // A value the INTEGER column cannot take would fail the whole entry.
+            const jsonDuration = audio.duration
+            const usable = typeof jsonDuration === "number" && jsonDuration > 0 && jsonDuration < 2 ** 31 - 1
+            audioBatch.push({
+              filePath: `/media/${mediaUuid}/${origName}`,
+              orderIdx: audio.orderInEntry ?? 0,
+              duration: usable ? Math.round(jsonDuration) : await probeDuration(finalOrigPath),
+            })
+          }
+        }
       } catch (err) {
         fileIoErr = err instanceof Error ? err.message : String(err)
       }
@@ -751,7 +871,15 @@ export async function POST(req: NextRequest) {
       }
 
       // ── 3. Transaction — DB writes only ──────────────────────────────────
-      const client = await db.connect()
+      // Fails this entry only: entries committed before it still need the rotation below.
+      let client
+      try {
+        client = await db.connect()
+      } catch (err) {
+        for (const f of allWrittenFiles) await unlink(f).catch(() => {})
+        errors.push(`${entry.uuid}: ${err instanceof Error ? err.message : String(err)}`)
+        continue
+      }
       try {
         await client.query("BEGIN")
 
@@ -777,8 +905,8 @@ export async function POST(req: NextRequest) {
           `INSERT INTO entries
              (id, journal_id, text, created_at, updated_at, starred,
               location_name, location_lat, location_lng,
-              weather_description, weather_temp_celsius, weather_icon)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+              weather_description, weather_temp_celsius, weather_icon, time_zone)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
            ON CONFLICT (id) DO NOTHING`,
           [
             entryId,
@@ -793,6 +921,7 @@ export async function POST(req: NextRequest) {
             weatherDescription,
             weatherTemp,
             weatherIcon,
+            timeZone,
           ]
         )
         if ((insDayOne.rowCount ?? 1) === 0) {
@@ -822,21 +951,39 @@ export async function POST(req: NextRequest) {
 
         // ── Videos ───────────────────────────────────────────────────────
         if (videoBatch.length > 0) {
-          await client.query(
+          const { rows } = await client.query(
             `INSERT INTO media (entry_id, type, file_path, thumbnail_path, order_index, duration_seconds)
-             SELECT $1::uuid, 'video', f, NULL, o, d
-             FROM UNNEST($2::text[], $3::int[], $4::int[]) AS u(f, o, d)`,
+             SELECT $1::uuid, 'video', f, t, o, d
+             FROM UNNEST($2::text[], $3::text[], $4::int[], $5::int[]) AS u(f, t, o, d)
+             RETURNING id, file_path`,
             [
               entryId,
               videoBatch.map(v => v.filePath),
+              videoBatch.map(v => v.thumbPath),
               videoBatch.map(v => v.orderIdx),
               videoBatch.map(v => v.duration),
             ]
           )
+          insertedVideos = rows
         }
 
         // ── PDFs ─────────────────────────────────────────────────────────
         await insertPdfBatch(client, entryId, pdfBatch)
+
+        // ── Audio memos ──────────────────────────────────────────────────
+        if (audioBatch.length > 0) {
+          await client.query(
+            `INSERT INTO media (entry_id, type, file_path, thumbnail_path, order_index, duration_seconds)
+             SELECT $1::uuid, 'audio', f, NULL, o, d
+             FROM UNNEST($2::text[], $3::int[], $4::int[]) AS u(f, o, d)`,
+            [
+              entryId,
+              audioBatch.map(a => a.filePath),
+              audioBatch.map(a => a.orderIdx),
+              audioBatch.map(a => a.duration),
+            ]
+          )
+        }
 
         // ── Tags — batch-upsert names, then batch-link to entry ────────────
         const tagNames = (entry.tags ?? []).map((t: string) => t.trim()).filter(Boolean)
@@ -858,6 +1005,11 @@ export async function POST(req: NextRequest) {
         await client.query("COMMIT")
         allWrittenFiles.length = 0 // committed — no file cleanup needed
         imported++
+        // Detached and one at a time (module-wide chain), like the upload.
+        for (const row of insertedVideos) {
+          const video = videoBatch.find(v => v.filePath === row.file_path)!
+          generateLoopClip(video.origFsPath, video.loopFsPath, row.id, video.loopWebPath)
+        }
       } catch (err) {
         await client.query("ROLLBACK").catch(() => {})
         for (const f of allWrittenFiles) await unlink(f).catch(() => {})
@@ -868,11 +1020,13 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    await rotateAfterImport(db, imported + skipped, warnings)
+
     return NextResponse.json({
       imported,
       skipped,
-      errors: errors.slice(0, 20), // cap at 20 error messages
-      warnings: warnings.slice(0, 20),
+      errors,
+      warnings,
       duration: Date.now() - start,
     })
   } finally {
@@ -921,6 +1075,7 @@ interface WithinV1Entry {
   text?: string
   createdAt: string
   updatedAt: string
+  timeZone?: string | null
   starred?: boolean
   location?: { name?: string; latitude?: number; longitude?: number } | null
   weather?: { description?: string | null; temperatureCelsius?: number | null; icon?: string | null } | null
@@ -965,16 +1120,26 @@ interface DayOnePdfAttachment {
   orderInEntry?: number
 }
 
+interface DayOneAudio {
+  identifier: string
+  md5: string
+  format?: string     // "aac", says nothing about the file name (audios/<md5>.m4a)
+  orderInEntry?: number
+  duration?: number   // seconds
+}
+
 interface DayOneEntry {
   uuid: string
   text?: string
   creationDate: string
   modifiedDate?: string
+  timeZone?: string
   starred?: boolean
   tags?: string[]
   photos?: DayOnePhoto[]
   videos?: DayOneVideo[]
   pdfAttachments?: DayOnePdfAttachment[]
+  audios?: DayOneAudio[]
   location?: {
     latitude?: number
     longitude?: number

@@ -343,3 +343,21 @@ DO $$ BEGIN
     ALTER TABLE media ADD COLUMN size_bytes INTEGER;
   END IF;
 END $$;
+
+-- ============================================================
+-- 20261104_120000 — entries.time_zone: Zeitzone des Eintrags
+-- ============================================================
+-- IANA-Name der Zone, in der der Eintrag entstand. NULL = App-Zone, so bleiben
+-- bestehende Einträge unverändert. Additiv und idempotent;
+-- scripts/backup/restore.sh legt die Spalte nach dem Einspielen eines älteren
+-- Dumps ebenfalls an, sonst scheitert danach jede Abfrage bis zum Neustart.
+-- Erst prüfen: Ein ALTER TABLE wartet sonst bei jedem App-Start auf die Sperre
+-- eines laufenden Backups und blockiert solange jeden Zugriff auf entries.
+DO $$ BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'entries' AND column_name = 'time_zone'
+  ) THEN
+    ALTER TABLE entries ADD COLUMN time_zone TEXT;
+  END IF;
+END $$;

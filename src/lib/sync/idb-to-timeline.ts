@@ -13,7 +13,7 @@
 import type { SyncEntry } from "@/lib/sync/types"
 import type { DateGroup, TimelineEntry } from "@/types/journal"
 import { extractTitle, stripMarkdown, truncateText } from "@/lib/format"
-import { dateKey } from "@/lib/timezone"
+import { dateKey, zoneOf } from "@/lib/timezone"
 
 export interface IDBTimelineFilters {
   journalId?: string | null
@@ -42,6 +42,7 @@ export function toTimelineEntry(entry: SyncEntry): TimelineEntry {
     journalId: entry.journalId,
     journalColor: "",
     createdAt: entry.createdAt,
+    timeZone: entry.timeZone ?? null,
     title,
     previewText,
     thumbnail: entry.thumbnailDataUrl ?? undefined,
@@ -93,7 +94,7 @@ export function syncEntriesToDateGroups(
 
   const groups = new Map<string, TimelineEntry[]>()
   for (const entry of filtered) {
-    const key = dateKey(new Date(entry.createdAt))
+    const key = dateKey(new Date(entry.createdAt), zoneOf(entry.timeZone))
     const bucket = groups.get(key)
     if (bucket) {
       bucket.push(toTimelineEntry(entry))
