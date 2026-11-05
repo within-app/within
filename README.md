@@ -7,7 +7,7 @@
 - **Write** text with Markdown, add photos, videos, voice memos and PDF files.
 - **Find** entries again: timeline, calendar, map, tags, favourites, full-text search, and "On this day".
 - **Take it with you:** install it on your phone as an app. Entries and pinned photos stay readable offline, encrypted on the device behind a PIN, and sync back when you are home.
-- **Move in from Day One:** import your existing journal from a Day One export, photos, videos and PDF attachments included.
+- **Move in from Day One:** import your existing journal from a Day One export, photos, videos, voice memos and PDF attachments included.
 - **Sleep well:** a nightly backup with an automatic restore check is part of the setup, not a chore.
 - German, English and French interface.
 
@@ -442,7 +442,11 @@ Run both in the folder with the file. With Portainer, see [Set up with Portainer
 
 ## Away from home
 
-Within is deliberately reachable only in your home network. If you want to write while travelling, the simplest safe way is **Tailscale** (or WireGuard): install it on the server and on your phone, then use the server's Tailscale address. You will need a certificate that covers that address too — the easiest route is to set `APP_HOST_IP` to the Tailscale IP and run `docker compose up -d` (the certificate on your devices stays valid; Within then answers on the Tailscale address only), or to put Within behind your own reverse proxy with its own certificate. Never forward port 443 on your router to Within.
+Within is deliberately reachable only in your home network. That boundary is what protects your journal, so Within has no remote access and this guide does not describe one.
+
+You can keep writing on the road anyway. The app you installed on your phone works without a connection: recent entries and pinned photos stay readable, and new entries and photos wait on the device, encrypted behind your PIN, until you are back in your home Wi-Fi. The map needs a connection.
+
+Never forward port 443 on your router to Within.
 
 ## If something does not work
 

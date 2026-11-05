@@ -116,7 +116,7 @@ export const fr: Messages = {
         counts: (e: number, m: number) => `${e} entrées · ${m} médias`,
         countsUnknown: "Nombre inconnu (sauvegarde antérieure à cette mise à jour)",
         mediaNote: "Les photos et vidéos sont toujours restaurées à l'état de la dernière sauvegarde, quelle que soit la sauvegarde de base de données choisie.",
-        otherDevicesNote: "Verrouillez ensuite les autres appareils et choisissez « Mot de passe oublié ? » sur l'écran de verrouillage pour réinitialiser leurs données locales — ce n'est qu'ainsi qu'ils chargeront entièrement l'état restauré.",
+        otherDevicesNote: "Les autres appareils chargent d'eux-mêmes l'état restauré à leur prochaine synchronisation, et les entrées encore en attente y sont conservées. Un appareil qui n'a pas synchronisé depuis la version 1.2.0 doit être réinitialisé une fois : voir docs/backup-restore.md.",
         button: "Restaurer la sauvegarde",
         confirmTitle: "Restaurer cette sauvegarde ?",
         confirmEmpty: (d: string, e: number, m: number) => `Restaurer la sauvegarde du ${d} avec ${e} entrées et ${m} médias ? Cette installation est vide, rien n'est perdu.`,

@@ -116,7 +116,7 @@ export const en: Messages = {
         counts: (e: number, m: number) => `${e} entries · ${m} media`,
         countsUnknown: "Count unknown (backup taken before this update)",
         mediaNote: "Photos and videos are always restored to the state of the most recent backup, regardless of which database backup you pick.",
-        otherDevicesNote: "Afterwards, lock other devices once and choose \"Forgot PIN?\" on the lock screen to reset their local data — only then do they fully load the restored state.",
+        otherDevicesNote: "Other devices load the restored state by themselves on their next sync, and entries still waiting on them are kept. A device that has not synced since version 1.2.0 needs a one-time reset: see docs/backup-restore.md.",
         button: "Restore backup",
         confirmTitle: "Restore this backup?",
         confirmEmpty: (d: string, e: number, m: number) => `Restore the backup from ${d} with ${e} entries and ${m} media? This installation is empty, nothing is lost.`,

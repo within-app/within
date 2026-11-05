@@ -23,6 +23,20 @@ function keyShapes(obj: Record<string, unknown>, prefix = ""): string[] {
   )
 }
 
+describe("i18n dictionaries — restore note", () => {
+  // Seit v1.2.0 gleichen sich andere Geräte nach einer Rücksicherung selbst ab.
+  // „PIN vergessen“ löscht alle lokalen Daten und darf nicht der Regelweg sein.
+  it.each([
+    ["de", de, /PIN vergessen/],
+    ["en", en, /Forgot PIN/],
+    ["fr", fr, /oublié/],
+  ] as const)("%s does not send other devices to the local-data wipe", (_name, dict, wipeWording) => {
+    const note = dict.settings.backup.restore.otherDevicesNote
+    expect(note).not.toMatch(wipeWording)
+    expect(note).toContain("docs/backup-restore.md")
+  })
+})
+
 describe("i18n dictionaries — structure parity", () => {
   it("en mirrors the exact key structure and value kinds of de", () => {
     expect(keyShapes(en)).toEqual(keyShapes(de))

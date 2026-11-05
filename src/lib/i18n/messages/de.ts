@@ -122,7 +122,7 @@ export const de = {
         counts: (e: number, m: number) => `${e} Einträge · ${m} Medien`,
         countsUnknown: "Anzahl unbekannt (Sicherung vor diesem Update)",
         mediaNote: "Fotos und Videos werden immer auf den Stand der letzten Sicherung gesetzt, unabhängig von der gewählten Datenbank-Sicherung.",
-        otherDevicesNote: "Andere Geräte danach einmal sperren und auf dem Sperrbildschirm „PIN vergessen?“ wählen, um die lokalen Daten zurückzusetzen — erst so laden sie den wiederhergestellten Stand vollständig.",
+        otherDevicesNote: "Andere Geräte laden den wiederhergestellten Stand beim nächsten Abgleich von selbst, dort noch wartende Einträge bleiben erhalten. Ein Gerät, das seit Version 1.2.0 nicht synchronisiert hat, braucht einmalig ein Zurücksetzen: siehe docs/backup-restore.md.",
         button: "Sicherung einspielen",
         confirmTitle: "Sicherung einspielen?",
         confirmEmpty: (d: string, e: number, m: number) => `Sicherung vom ${d} mit ${e} Einträgen und ${m} Medien einspielen? Diese Installation ist leer, es geht nichts verloren.`,
